@@ -1,0 +1,7 @@
+node_modules/
+out/
+dist/
+.verify-ud/
+*.log
+# 插件打包产物(npm run plugin:build 生成)
+imark-plugin/webview/

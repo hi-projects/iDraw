@@ -1,0 +1,29 @@
+{
+  "name": "idraw",
+  "productName": "iDraw",
+  "version": "0.1.0",
+  "description": "iDraw — 用标准 SVG 画流程图与示意图",
+  "main": "out/main/index.js",
+  "private": true,
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "plugin:build": "node scripts/build-imark-plugin.mjs",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
+    "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
+    "typecheck:plugin": "tsc --noEmit -p tsconfig.plugin.json --composite false",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web && npm run typecheck:plugin"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@vitejs/plugin-vue": "^5.2.4",
+    "electron": "44.7.0",
+    "electron-vite": "^3.1.0",
+    "lucide-vue-next": "^1.0.0",
+    "typescript": "^5.9.3",
+    "vite": "^6.4.4",
+    "vue": "^3.5.13",
+    "vue-tsc": "^3.0.0"
+  }
+}

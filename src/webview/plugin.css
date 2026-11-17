@@ -1,0 +1,40 @@
+/*
+ * iMark 插件外壳的适配样式。
+ *
+ * 主题变量由 bridge.ts 从 iMark 的 imark:bootstrap / imark:theme 消息写入
+ * `document.documentElement`,所以这里只调整布局密度,不写死颜色。
+ */
+
+.imark-app {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.imark-toolbar {
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 8px;
+}
+
+/* 面板窄时也保持分段控件的药丸形,只把控件缩小一档 */
+.imark-toolbar .canvas-tool-btn {
+  min-width: 30px;
+  height: 30px;
+  border-radius: 8px;
+}
+
+/* iMark 的编辑区两侧常驻文件树/大纲，画布宽度可能只有 400px 左右 */
+.imark-app .canvas-new-card {
+  width: min(380px, calc(100% - 24px));
+}
+
+.imark-app .idraw-toasts {
+  right: 12px;
+  bottom: 12px;
+}
+
+.imark-app .idraw-toast {
+  border-radius: 10px;
+}

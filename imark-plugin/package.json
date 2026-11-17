@@ -1,0 +1,78 @@
+{
+  "name": "canvas",
+  "publisher": "idraw",
+  "version": "1.0.0",
+  "displayName": "iDraw",
+  "description": "在 iMark 里绘制与编辑流程图、示意图，保存为标准 SVG",
+  "author": "iDraw",
+  "engines": { "imark": "^1.0.0" },
+  "main": "./main.js",
+  "icon": "./icon.svg",
+  "activationEvents": [
+    "onCommand:idraw.canvas.open",
+    "onCommand:idraw.canvas.new",
+    "onCommand:idraw.canvas.save",
+    "onCommand:idraw.canvas.saveAs",
+    "onCommand:idraw.canvas.exportPng",
+    "onCommand:idraw.canvas.undo",
+    "onCommand:idraw.canvas.redo",
+    "onWebviewPanel:idraw.canvas"
+  ],
+  "capabilities": {
+    "filesystem": "workspace"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "idraw.canvas.open",
+        "title": "打开画布",
+        "category": "iDraw",
+        "detail": "在仓库里选择一个 .svg 画布，用 iDraw 打开"
+      },
+      {
+        "command": "idraw.canvas.new",
+        "title": "新建画布",
+        "category": "iDraw",
+        "detail": "输入画布名称，创建仓库里的 SVG 并打开"
+      },
+      {
+        "command": "idraw.canvas.save",
+        "title": "保存画布",
+        "category": "iDraw"
+      },
+      {
+        "command": "idraw.canvas.saveAs",
+        "title": "画布另存为",
+        "category": "iDraw"
+      },
+      {
+        "command": "idraw.canvas.exportPng",
+        "title": "导出画布 PNG",
+        "category": "iDraw"
+      },
+      {
+        "command": "idraw.canvas.undo",
+        "title": "撤销画布操作",
+        "category": "iDraw"
+      },
+      {
+        "command": "idraw.canvas.redo",
+        "title": "重做画布操作",
+        "category": "iDraw"
+      }
+    ],
+    "imark.actions": [
+      {
+        "command": "idraw.canvas.open",
+        "label": "打开画布",
+        "scope": "global",
+        "primary": true
+      },
+      {
+        "command": "idraw.canvas.new",
+        "label": "新建画布",
+        "scope": "global"
+      }
+    ]
+  }
+}

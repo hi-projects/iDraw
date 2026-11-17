@@ -1,0 +1,145 @@
+:root {
+  /*
+   * UI 字体:优先各平台的原生 UI 字体,再显式补上 Noto / 思源黑体。
+   * Linux 上不能只写 'Segoe UI' —— fontconfig 会把它兜到 DejaVu Sans,
+   * 中英混排会明显发钝。Noto Sans CJK 的拉丁字形更干净,优先于兜底字体。
+   */
+  --font-editor: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC',
+    'Noto Sans SC', 'Source Han Sans SC', 'Microsoft YaHei', 'PingFang SC',
+    'Hiragino Sans GB', sans-serif;
+  /* 文档正文字体:与 Obsidian(Minimal 主题的 --font-text)同一套字体栈。 */
+  --font-text: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC',
+    'Noto Sans SC', Roboto, Inter, Ubuntu, sans-serif;
+  --font-mono: 'Cascadia Code', Consolas, 'JetBrains Mono', 'Courier New', monospace;
+
+  /* 现代 UI 的圆角/阴影语法,统一在这里改 */
+  --radius-xs: 8px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+  --shadow-soft: 0 1px 2px rgba(20, 22, 35, 0.05), 0 8px 24px rgba(20, 22, 35, 0.08);
+  --shadow-float: 0 16px 48px rgba(20, 22, 35, 0.16), 0 2px 6px rgba(20, 22, 35, 0.06);
+  /* 无限画布的点阵:画布永远是浅色纸面,不跟随深浅主题 */
+  --canvas-dot: rgba(20, 22, 35, 0.12);
+  /* 编辑器正文字号:设置面板「编辑器」页写这个变量,标题/代码块按 em 跟着缩。
+     它不属于任何一档主题 —— 换主题不该把字号也换掉。
+     默认 18px,与旧版「基准 13px × 1.375」的默认视觉一致 */
+  --editor-font-size: 18px;
+  /* 实际正文字号 = 设置值本身(所见即所得)。保留这个别名是因为插件 webview、
+     表格、公式预览等按「正文大小」引用它,不关心它从哪来。 */
+  --editor-body-size: var(--editor-font-size);
+  /* 正文栏最大宽度(含两侧 gutter):占编辑区的 96%,左右各留 2% 空白。
+     想固定成像素值(如 700px)或改宽窄,在自定义样式里覆盖这个变量即可。 */
+  --editor-line-width: 96%;
+  /* 正文栏两侧的留白:行首「+」按钮与引用竖线画在这里。
+     正文宽度 = --editor-line-width - 2 × 这个值(见 editor/setup.ts)。
+     注意别把它设得小于行首按钮的宽度,否则按钮会被裁掉。 */
+  --editor-line-gutter: 28px;
+}
+
+:root,
+:root[data-theme='light'] {
+  --bg-app: #f4f4f7;
+  --bg-editor: #ffffff;
+  --bg-toolbar: #ffffff;
+  --bg-toolbar-btn-hover: #f1f1f5;
+  /* 工具栏里的分段控件底色(药丸形工具组) */
+  --bg-segment: #f3f3f7;
+  --bg-segment-hover: rgba(255, 255, 255, 0.72);
+  /* 输入框/下拉的底色 */
+  --bg-control: #fafafc;
+  --text-primary: #1b1c21;
+  --text-secondary: #60626c;
+  --text-tertiary: #9a9ca6;
+  --border: #e7e7ee;
+  --border-strong: #dcdce4;
+  /* 引用块左侧竖线:比 --border 在深色下更亮一档;浅色沿用边框灰 */
+  --quote-bar: #e7e7ee;
+  /* 强调色:偏紫的靛蓝,比 GitHub 蓝更年轻 */
+  --accent: #5b5bd6;
+  --accent-hover: #4b4bc2;
+  --accent-soft: rgba(91, 91, 214, 0.1);
+  --accent-softer: rgba(91, 91, 214, 0.06);
+  --bg-code: rgba(175, 184, 193, 0.25);
+  --bg-codeblock: #f6f8fa;
+  --bg-selection: rgba(91, 91, 214, 0.16);
+  --shadow: rgba(20, 22, 35, 0.1);
+  --success: #16a34a;
+  --warn: #d97706;
+  --danger: #e5484d;
+  /* 合并冲突:当前分支(绿)/ 传入分支(蓝)/ 基准段(灰),与 VSCode 的配色语义一致 */
+  --conflict-current: #16a34a;
+  --conflict-incoming: #5b5bd6;
+  --conflict-base: #9a9ca6;
+  /*
+   * UI 选中行(文件 / 大纲 / 设置导航)与编辑器选区是两回事,分开着色:
+   * 亮色使用强调色淡底与强调色文字。
+   */
+  --bg-active: var(--accent-soft);
+  --active-text: var(--accent);
+  --caret-color: var(--accent);
+  --list-marker-color: var(--accent);
+  /* 滚动条拇指:与 Obsidian 同款 —— 10% 前景色,悬停/拖动加深到 20% */
+  --scrollbar-thumb-bg: color-mix(in oklch, #000000 10%, transparent);
+  --scrollbar-hover-thumb-bg: color-mix(in oklch, #000000 20%, transparent);
+  --scrollbar-active-thumb-bg: color-mix(in oklch, #000000 20%, transparent);
+}
+
+/*
+ * 深色:底色 / 边框 / 滚动条对齐用户 Obsidian 的 Minimal 主题,
+ * **文字颜色保持 iDraw 自己的默认值**,不跟着 Obsidian 走。
+ *
+ *   bg1 #262626 编辑区        bg2 #212121 侧栏 / 工具栏 / 代码底色
+ *   ui1 #363636 边框          ui2 #454545 悬停 / 引用条
+ *   正文 #dadada / 次级 #b3b3b3 / 弱化 #666666 / 强调色 #8a5cf5
+ */
+:root[data-theme='dark'] {
+  --bg-app: #191a1f;
+  --bg-editor: #202127;
+  --bg-toolbar: #23242b;
+  --bg-toolbar-btn-hover: #2e2f37;
+  --bg-segment: #2b2c34;
+  --bg-segment-hover: rgba(255, 255, 255, 0.06);
+  --bg-control: #292a31;
+  --text-primary: #ececf1;
+  --text-secondary: #a6a7b3;
+  --text-tertiary: #6f707d;
+  --border: #34353e;
+  --border-strong: #3e3f49;
+  /* Minimal 的引用条:--quote-opening-modifier = --ui2 */
+  --quote-bar: #454545;
+  --accent: #8b7cff;
+  --accent-hover: #a294ff;
+  --accent-soft: rgba(139, 124, 255, 0.16);
+  --accent-softer: rgba(139, 124, 255, 0.09);
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.24), 0 8px 24px rgba(0, 0, 0, 0.28);
+  --shadow-float: 0 18px 52px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
+  /* Obsidian 的代码底色 = --background-primary-alt = bg2 */
+  --bg-code: #212121;
+  --bg-codeblock: #212121;
+  /* 编辑器选区:Minimal 的 --hl1 = hsla(201, 50%, 40%, 30%) */
+  --bg-selection: rgba(51, 117, 153, 0.3);
+  /*
+   * UI 选中行用 Obsidian 的灰色高亮,而不是蓝色/紫色选区色;
+   * 文字仍用 iDraw 默认的强调色。
+   */
+  --bg-active: #2e2e2e;
+  --active-text: var(--accent);
+  --caret-color: var(--accent);
+  --list-marker-color: var(--accent);
+  --shadow: rgba(0, 0, 0, 0.3);
+  --success: #44cf6e;
+  --warn: #e9973f;
+  --danger: #fb464c;
+  --conflict-current: #3fb950;
+  --conflict-incoming: #58a6ff;
+  --conflict-base: #8b949e;
+  /*
+   * 滚动条:与 Obsidian + Minimal 主题的深色滚动条同款色号 ——
+   * ui1 #363636(常态)、ui2 #454545(悬停)、ui3 #595959(拖动)。
+   * 11px 轨道、3px 透明边框后的 5px 拇指,几何见 base.css。
+   */
+  --scrollbar-thumb-bg: #363636;
+  --scrollbar-hover-thumb-bg: #454545;
+  --scrollbar-active-thumb-bg: #595959;
+}

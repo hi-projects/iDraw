@@ -22,6 +22,35 @@ function dashOf(style: { dash: boolean; strokeWidth: number }): string | undefin
   return style.dash ? `${num(style.strokeWidth * 3)} ${num(style.strokeWidth * 2)}` : undefined
 }
 
+/** 在 w×h 的框内生成正多边形顶点,默认尖角朝上 */
+function regularPolygon(w: number, h: number, sides: number, rotation = -Math.PI / 2): string {
+  const cx = w / 2
+  const cy = h / 2
+  const rx = w / 2
+  const ry = h / 2
+  const points: string[] = []
+  for (let i = 0; i < sides; i += 1) {
+    const angle = rotation + (i * Math.PI * 2) / sides
+    points.push(`${num(cx + Math.cos(angle) * rx)},${num(cy + Math.sin(angle) * ry)}`)
+  }
+  return points.join(' ')
+}
+
+/** 五角星:外顶点与内顶点交替 */
+function starPolygon(w: number, h: number): string {
+  const cx = w / 2
+  const cy = h / 2
+  const inner = 0.42
+  const points: string[] = []
+  for (let i = 0; i < 10; i += 1) {
+    const angle = -Math.PI / 2 + (i * Math.PI) / 5
+    const rx = (w / 2) * (i % 2 === 0 ? 1 : inner)
+    const ry = (h / 2) * (i % 2 === 0 ? 1 : inner)
+    points.push(`${num(cx + Math.cos(angle) * rx)},${num(cy + Math.sin(angle) * ry)}`)
+  }
+  return points.join(' ')
+}
+
 /** 形状本身的元素(局部坐标 0..w / 0..h);`text` 形状没有 */
 export function shapeParts(node: CanvasNode): SvgPart[] {
   const { w, h, style } = node
@@ -94,6 +123,47 @@ export function shapeParts(node: CanvasNode): SvgPart[] {
       const z = Math.min(h * 0.12, 10)
       const d = `M0,0 L${num(w)},0 L${num(w)},${num(h - z)} C${num(w * 0.7)},${num(h + z * 0.4)} ${num(w * 0.3)},${num(h - z * 1.6)} 0,${num(h)} Z`
       return [{ tag: 'path', attrs: { d, ...paint } }]
+    }
+    case 'triangle':
+      return [
+        {
+          tag: 'polygon',
+          attrs: { points: `${num(w / 2)},0 ${num(w)},${num(h)} 0,${num(h)}`, ...paint }
+        }
+      ]
+    case 'rightTriangle':
+      return [
+        {
+          tag: 'polygon',
+          attrs: { points: `0,0 ${num(w)},${num(h)} 0,${num(h)}`, ...paint }
+        }
+      ]
+    case 'pentagon':
+      return [{ tag: 'polygon', attrs: { points: regularPolygon(w, h, 5), ...paint } }]
+    case 'octagon':
+      return [
+        {
+          tag: 'polygon',
+          attrs: { points: regularPolygon(w, h, 8, -Math.PI / 2 + Math.PI / 8), ...paint }
+        }
+      ]
+    case 'star':
+      return [{ tag: 'polygon', attrs: { points: starPolygon(w, h), ...paint } }]
+    case 'arrow': {
+      const shaft = h * 0.34
+      const y1 = (h - shaft) / 2
+      const y2 = (h + shaft) / 2
+      const head = w * 0.62
+      const points = `0,${num(y1)} ${num(head)},${num(y1)} ${num(head)},0 ${num(w)},${num(h / 2)} ${num(head)},${num(h)} ${num(head)},${num(y2)} 0,${num(y2)}`
+      return [{ tag: 'polygon', attrs: { points, ...paint } }]
+    }
+    case 'plus': {
+      const x1 = w * 0.36
+      const x2 = w * 0.64
+      const y1 = h * 0.36
+      const y2 = h * 0.64
+      const points = `${num(x1)},0 ${num(x2)},0 ${num(x2)},${num(y1)} ${num(w)},${num(y1)} ${num(w)},${num(y2)} ${num(x2)},${num(y2)} ${num(x2)},${num(h)} ${num(x1)},${num(h)} ${num(x1)},${num(y2)} 0,${num(y2)} 0,${num(y1)} ${num(x1)},${num(y1)}`
+      return [{ tag: 'polygon', attrs: { points, ...paint } }]
     }
     case 'text':
       return []

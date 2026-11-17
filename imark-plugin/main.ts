@@ -329,7 +329,8 @@ export class CanvasPlugin {
       }
       for (const [name, type] of entries) {
         if (out.length >= MAX_SVG_ITEMS) return
-        if (name.startsWith('.')) continue
+        // 画布现在统一放仓库根的 .assets;它要出现在「打开画布」里,其它隐藏目录仍跳过
+        if (name.startsWith('.') && name !== '.assets') continue
         const child = imark.Uri.joinPath(dir, name)
         const rel = prefix ? `${prefix}/${name}` : name
         if (type & imark.FileType.Directory) {
@@ -412,7 +413,7 @@ export class CanvasPlugin {
     }
     const value = await imark.window.showInputBox({
       title: '新建画布',
-      prompt: '输入画布名称，会保存为仓库里的 SVG 文件',
+      prompt: '输入画布名称，会保存到仓库的 .assets 目录',
       placeHolder: '流程图.svg',
       validateInput: text =>
         normalizeRel(withExtension(text.trim(), 'svg')) ? undefined : '名称不能为空，且不能包含 ..'
@@ -420,7 +421,10 @@ export class CanvasPlugin {
     if (!value) return null
     const rel = normalizeRel(withExtension(value.trim(), 'svg'))
     if (!rel) return null
-    const target = this.uriFromRel(root, rel)
+    // 画布统一收进仓库根的 .assets(与粘贴图片同一个目录),文件树不显示但同步会带上。
+    // 用户把 `.assets/` 也敲进来时不重复嵌套。
+    const name = rel.replace(/^\.assets\//, '')
+    const target = this.uriFromRel(root, `.assets/${name}`)
     if (await this.exists(target.fsPath)) {
       await imark.window.showWarningMessage(`“${basename(target.fsPath)}”已存在，换一个名称。`)
       return null

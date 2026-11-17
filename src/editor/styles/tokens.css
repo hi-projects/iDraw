@@ -19,7 +19,7 @@
   --radius-lg: 18px;
   --shadow-soft: 0 1px 2px rgba(20, 22, 35, 0.05), 0 8px 24px rgba(20, 22, 35, 0.08);
   --shadow-float: 0 16px 48px rgba(20, 22, 35, 0.16), 0 2px 6px rgba(20, 22, 35, 0.06);
-  /* 无限画布的点阵:画布永远是浅色纸面,不跟随深浅主题 */
+  /* 白色画布/白纸缩略图上的点阵;深色编辑画布的浅色点阵在 canvas.css 里覆盖 */
   --canvas-dot: rgba(20, 22, 35, 0.12);
   /* 编辑器正文字号:设置面板「编辑器」页写这个变量,标题/代码块按 em 跟着缩。
      它不属于任何一档主题 —— 换主题不该把字号也换掉。
@@ -55,14 +55,18 @@
   --border-strong: #dcdce4;
   /* 引用块左侧竖线:比 --border 在深色下更亮一档;浅色沿用边框灰 */
   --quote-bar: #e7e7ee;
-  /* 强调色:偏紫的靛蓝,比 GitHub 蓝更年轻 */
-  --accent: #5b5bd6;
-  --accent-hover: #4b4bc2;
-  --accent-soft: rgba(91, 91, 214, 0.1);
-  --accent-softer: rgba(91, 91, 214, 0.06);
+  /* 强调色:与应用图标一致的青绿色 */
+  --accent: #178c82;
+  --accent-hover: #12756c;
+  --accent-soft: rgba(23, 140, 130, 0.12);
+  --accent-softer: rgba(23, 140, 130, 0.07);
+  /* 品牌绿是同一种颜色的语义别名,选择页等场景按需使用 */
+  --brand: var(--accent);
+  --brand-hover: var(--accent-hover);
+  --brand-soft: var(--accent-soft);
   --bg-code: rgba(175, 184, 193, 0.25);
   --bg-codeblock: #f6f8fa;
-  --bg-selection: rgba(91, 91, 214, 0.16);
+  --bg-selection: rgba(23, 140, 130, 0.18);
   --shadow: rgba(20, 22, 35, 0.1);
   --success: #16a34a;
   --warn: #d97706;
@@ -108,17 +112,21 @@
   --border-strong: #3e3f49;
   /* Minimal 的引用条:--quote-opening-modifier = --ui2 */
   --quote-bar: #454545;
-  --accent: #8b7cff;
-  --accent-hover: #a294ff;
-  --accent-soft: rgba(139, 124, 255, 0.16);
-  --accent-softer: rgba(139, 124, 255, 0.09);
+  /* 深色下把品牌绿提亮,保证在深底上的可读性 */
+  --accent: #2cb5a8;
+  --accent-hover: #3fcbbc;
+  --accent-soft: rgba(44, 181, 168, 0.18);
+  --accent-softer: rgba(44, 181, 168, 0.1);
+  --brand: var(--accent);
+  --brand-hover: var(--accent-hover);
+  --brand-soft: var(--accent-soft);
   --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.24), 0 8px 24px rgba(0, 0, 0, 0.28);
   --shadow-float: 0 18px 52px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
   /* Obsidian 的代码底色 = --background-primary-alt = bg2 */
   --bg-code: #212121;
   --bg-codeblock: #212121;
-  /* 编辑器选区:Minimal 的 --hl1 = hsla(201, 50%, 40%, 30%) */
-  --bg-selection: rgba(51, 117, 153, 0.3);
+  /* 编辑器选区:跟随品牌绿的半透明底色 */
+  --bg-selection: rgba(44, 181, 168, 0.24);
   /*
    * UI 选中行用 Obsidian 的灰色高亮,而不是蓝色/紫色选区色;
    * 文字仍用 iDraw 默认的强调色。

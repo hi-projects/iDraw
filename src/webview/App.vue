@@ -188,12 +188,6 @@ async function exportPng(): Promise<void> {
   await rt.exportPng()
 }
 
-function handleFileAction(action: 'new' | 'open' | 'save'): void {
-  if (action === 'new') newDocument()
-  else if (action === 'open') openDialog()
-  else void save(false)
-}
-
 /** 插件 webview 没有 Electron 菜单,把 iMark 菜单的快捷键补在页面内 */
 function onKeydown(e: KeyboardEvent): void {
   if (!(e.ctrlKey || e.metaKey) || e.altKey) return
@@ -288,11 +282,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="imark-app">
     <div v-if="runtime" :key="docKey" class="canvas-pane" data-idraw-canvas-pane>
-      <CanvasToolbar
-        v-if="!runtime.readOnly"
-        :runtime="runtime"
-        @file-action="handleFileAction"
-      />
+      <CanvasToolbar v-if="!runtime.readOnly" :runtime="runtime" />
       <CanvasView :runtime="runtime" />
     </div>
     <div v-else class="idraw-loading">正在准备画布…</div>

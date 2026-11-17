@@ -1,2 +1,5 @@
 import '../../../editor/styles'
 import './app.css'
+import './workspace.css'
+import './settings.css'
+import './dialogs.css'

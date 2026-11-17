@@ -203,6 +203,13 @@ const SHAPES: ReadonlySet<string> = new Set<ShapeKind>([
   'hexagon',
   'cylinder',
   'document',
+  'triangle',
+  'rightTriangle',
+  'pentagon',
+  'octagon',
+  'star',
+  'arrow',
+  'plus',
   'text'
 ])
 const ANCHORS: ReadonlySet<string> = new Set<AnchorSide>(['auto', 'n', 'e', 's', 'w'])

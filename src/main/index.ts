@@ -1,10 +1,29 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, screen } from 'electron'
 import type { MenuItemConstructorOptions } from 'electron'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { IPC } from '@shared/ipc'
-import type { DiscardChoice, MenuCommand, SaveFileDialogOptions } from '@shared/api'
+import type {
+  DiscardChoice,
+  MenuCommand,
+  RecentKind,
+  SaveFileDialogOptions,
+  WorkspaceInfo
+} from '@shared/api'
+import {
+  createWorkspaceCanvas,
+  deleteWorkspaceCanvas,
+  readWorkspace,
+  renameWorkspaceCanvas
+} from './workspace'
+import {
+  forgetRecent,
+  pruneRecentEntries,
+  recentEntries,
+  touchFile,
+  touchWorkspace
+} from './workspaceRecents'
 import iconPath from '../../build/icon.png?asset'
 
 app.setName('iDraw')
@@ -12,6 +31,10 @@ app.setName('iDraw')
 let mainWindow: BrowserWindow | null = null
 let pendingOpenFile: string | null = null
 let lastDir: string | null = null
+/** 记录窗口是否是被「进入画布」自动最大化的,避免把用户手动最大化也还原掉 */
+let autoMaximized = false
+/** 渲染层确认可以关闭后,放行窗口的 close 事件 */
+let allowWindowClose = false
 
 function sendMenuCommand(command: MenuCommand): void {
   mainWindow?.webContents.send(IPC.MenuCommand, command)
@@ -68,6 +91,19 @@ async function writeAtomic(path: string, data: string | Uint8Array): Promise<voi
   }
 }
 
+/** beforeunload 里用:同步写盘,保证自动保存的最后一笔不丢 */
+function writeAtomicSync(path: string, data: string): void {
+  mkdirSync(dirname(path), { recursive: true })
+  const temp = `${path}.${process.pid}.${Date.now()}.tmp`
+  try {
+    writeFileSync(temp, data)
+    renameSync(temp, path)
+  } catch (err) {
+    rmSync(temp, { force: true })
+    throw err
+  }
+}
+
 function buildMenu(): void {
   const isMac = process.platform === 'darwin'
   const send = (command: MenuCommand) => (): void => sendMenuCommand(command)
@@ -92,8 +128,13 @@ function buildMenu(): void {
     {
       label: '文件',
       submenu: [
-        { label: '新建', accelerator: 'CmdOrCtrl+N', click: send('file:new') },
-        { label: '打开…', accelerator: 'CmdOrCtrl+O', click: send('file:open') },
+        { label: '新建画布', accelerator: 'CmdOrCtrl+N', click: send('file:new') },
+        { label: '打开文件…', accelerator: 'CmdOrCtrl+O', click: send('file:open') },
+        {
+          label: '仓库选择…',
+          accelerator: 'CmdOrCtrl+Shift+O',
+          click: send('file:open-workspace')
+        },
         { type: 'separator' },
         { label: '保存', accelerator: 'CmdOrCtrl+S', click: send('file:save') },
         { label: '另存为…', accelerator: 'CmdOrCtrl+Shift+S', click: send('file:save-as') },
@@ -119,7 +160,7 @@ function buildMenu(): void {
     {
       label: '视图',
       submenu: [
-        { role: 'reload', label: '重新加载' },
+        { label: '重新加载', accelerator: 'CmdOrCtrl+R', click: send('app:reload') },
         { role: 'toggleDevTools', label: '开发者工具' },
         { type: 'separator' },
         { role: 'resetZoom', label: '实际大小' },
@@ -214,6 +255,17 @@ function registerIpc(): void {
     }
   )
 
+  // 同步通道只给 beforeunload 用;sendSync 会阻塞主进程,不适合普通保存
+  ipcMain.on(IPC.FileWriteSync, (event, payload: { path: string; content: string }) => {
+    try {
+      writeAtomicSync(payload.path, payload.content)
+      event.returnValue = true
+    } catch (err) {
+      console.error('[iDraw] 关闭前同步保存失败:', err)
+      event.returnValue = false
+    }
+  })
+
   ipcMain.handle(
     IPC.ConfirmDiscard,
     async (_event, payload: { fileName: string }): Promise<DiscardChoice> => {
@@ -238,12 +290,122 @@ function registerIpc(): void {
     pendingOpenFile = null
     return path
   })
+
+  // 自定义标题栏只保留最小化与关闭(Windows/Linux)
+  ipcMain.on(IPC.WindowMinimize, () => mainWindow?.minimize())
+  ipcMain.on(IPC.WindowClose, () => mainWindow?.close())
+  // 打开画布/仓库时最大化(保留 Windows 任务栏),回选择页时还原
+  ipcMain.on(IPC.WindowMaximize, () => {
+    const win = mainWindow
+    if (!win) return
+    autoMaximized = !win.isMaximized()
+    if (autoMaximized) win.maximize()
+  })
+  ipcMain.on(IPC.WindowUnmaximize, () => {
+    if (!mainWindow) return
+    if (autoMaximized) mainWindow.unmaximize()
+    autoMaximized = false
+  })
+  ipcMain.on(IPC.WindowCloseDecision, (_event, allow: boolean) => {
+    if (!allow || !mainWindow) return
+    allowWindowClose = true
+    mainWindow.close()
+  })
+
+  // ---------- 仓库(工作区) ----------
+
+  ipcMain.handle(IPC.WorkspacePickDirectory, async (): Promise<string | null> => {
+    const options = {
+      title: '打开仓库文件夹',
+      defaultPath: lastDir ?? app.getPath('documents'),
+      // createDirectory 让 macOS 的对话框也能新建文件夹;Windows/Linux 自带新建按钮
+      properties: ['openDirectory' as const, 'createDirectory' as const]
+    }
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, options)
+      : await dialog.showOpenDialog(options)
+    if (result.canceled || !result.filePaths[0]) return null
+    lastDir = result.filePaths[0]
+    return result.filePaths[0]
+  })
+
+  ipcMain.handle(
+    IPC.WorkspaceRead,
+    async (_event, payload: { dir: string }): Promise<WorkspaceInfo> => {
+      return readWorkspace(payload.dir)
+    }
+  )
+
+  ipcMain.handle(
+    IPC.WorkspaceCreateCanvas,
+    async (_event, payload: { dir: string; name: string; content: string }) => {
+      return createWorkspaceCanvas(payload.dir, payload.name, payload.content)
+    }
+  )
+
+  ipcMain.handle(
+    IPC.WorkspaceRenameCanvas,
+    async (_event, payload: { dir: string; from: string; name: string }) => {
+      return renameWorkspaceCanvas(payload.dir, payload.from, payload.name)
+    }
+  )
+
+  ipcMain.handle(
+    IPC.WorkspaceDeleteCanvas,
+    async (_event, payload: { dir: string; relPath: string }): Promise<void> => {
+      await deleteWorkspaceCanvas(payload.dir, payload.relPath)
+    }
+  )
+
+  ipcMain.handle(
+    IPC.WorkspaceConfirmDelete,
+    async (_event, payload: { name: string }): Promise<boolean> => {
+      const options = {
+        type: 'warning' as const,
+        buttons: ['移到回收站', '取消'],
+        defaultId: 1,
+        cancelId: 1,
+        noLink: true,
+        message: `删除“${payload.name || '画布'}”？`,
+        detail: '文件会移到系统回收站，可以从回收站恢复。'
+      }
+      const choice = mainWindow
+        ? dialog.showMessageBoxSync(mainWindow, options)
+        : dialog.showMessageBoxSync(options)
+      return choice === 0
+    }
+  )
+
+  ipcMain.handle(IPC.WorkspaceRecents, () => recentEntries())
+  ipcMain.handle(IPC.WorkspacePruneRecents, () => pruneRecentEntries())
+  ipcMain.handle(
+    IPC.WorkspaceTouch,
+    async (_event, payload: { dir: string }): Promise<void> => {
+      await touchWorkspace(payload.dir)
+    }
+  )
+  ipcMain.handle(
+    IPC.WorkspaceTouchFile,
+    async (_event, payload: { path: string }): Promise<void> => {
+      await touchFile(payload.path)
+    }
+  )
+  ipcMain.handle(
+    IPC.WorkspaceForget,
+    async (_event, payload: { kind: RecentKind; path: string }): Promise<void> => {
+      await forgetRecent(payload.kind, payload.path)
+    }
+  )
 }
 
 function createWindow(): void {
+  // 选择页用普通窗口居中显示(约屏幕工作区的 82%),打开画布后再最大化
+  const workArea = screen.getPrimaryDisplay().workAreaSize
+  const width = Math.min(1280, Math.max(900, Math.round(workArea.width * 0.82)))
+  const height = Math.min(820, Math.max(600, Math.round(workArea.height * 0.82)))
   const win = new BrowserWindow({
-    width: 1440,
-    height: 900,
+    width,
+    height,
     minWidth: 900,
     minHeight: 600,
     show: false,
@@ -251,19 +413,11 @@ function createWindow(): void {
     icon: windowIcon(),
     backgroundColor: '#f4f4f7',
     /*
-     * Windows / Linux:去掉原生标题栏,把最小化/最大化/关闭画成覆盖层贴在工具栏右侧。
-     * 顶部只剩画布工具栏,不再有一条与主题无关的标题栏白边。macOS 保留原生标题栏
-     * (交通灯位置需要单独适配)。
+     * Windows / Linux:去掉原生标题栏,由渲染层在右上角画最小化/关闭按钮
+     * (不提供最大化按钮)。macOS 保留原生标题栏(交通灯位置需要单独适配)。
      */
     ...(process.platform === 'win32' || process.platform === 'linux'
-      ? {
-          titleBarStyle: 'hidden' as const,
-          titleBarOverlay: {
-            color: '#ffffff',
-            symbolColor: '#60626c',
-            height: 52
-          }
-        }
+      ? { titleBarStyle: 'hidden' as const }
       : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -282,13 +436,25 @@ function createWindow(): void {
    */
   win.setMenuBarVisibility(false)
 
-  // 默认铺满整个屏幕:内容就绪后先最大化再显示,避免窗口先以小尺寸闪一下
+  // 内容就绪后居中显示普通窗口;画布视图由渲染层请求最大化
   win.on('ready-to-show', () => {
-    win.maximize()
+    win.center()
     win.show()
+  })
+  allowWindowClose = false
+  // 关闭前先交给渲染层做未保存确认;确认后通过 IPC 放行
+  win.on('close', event => {
+    // 页面还在加载时没有未保存内容,直接放行
+    if (allowWindowClose || win.webContents.isDestroyed() || win.webContents.isLoading()) {
+      return
+    }
+    event.preventDefault()
+    win.webContents.send(IPC.WindowCloseRequested)
   })
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null
+    autoMaximized = false
+    allowWindowClose = false
   })
 
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))

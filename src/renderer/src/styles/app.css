@@ -20,8 +20,11 @@ textarea {
   font-family: inherit;
 }
 
+/* 外壳是纵向 flex:画布区撑满,底部状态栏固定高度 */
 .idraw-app {
   position: relative;
+  display: flex;
+  flex-direction: column;
   width: 100%;
   height: 100%;
   overflow: hidden;
@@ -33,6 +36,89 @@ textarea {
   justify-content: center;
   height: 100%;
   color: var(--text-tertiary);
+}
+
+/* ---------- 自定义窗口按钮(Windows/Linux) ---------- */
+
+.idraw-window-controls {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 52px;
+  padding-right: 10px;
+  -webkit-app-region: no-drag;
+}
+
+.idraw-window-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: default;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.idraw-window-btn:hover {
+  background: var(--bg-toolbar-btn-hover);
+  color: var(--text-primary);
+}
+
+.idraw-window-btn:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--accent-soft);
+}
+
+.idraw-window-btn.is-close:hover {
+  background: var(--danger);
+  color: #ffffff;
+}
+
+.idraw-window-btn.is-close:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--danger) 35%, transparent);
+}
+
+/* ---------- 主题化悬浮提示 ---------- */
+
+.idraw-tooltip {
+  position: fixed;
+  z-index: 200;
+  max-width: min(320px, calc(100vw - 24px));
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-toolbar);
+  color: var(--text-primary);
+  font-family: var(--font-editor);
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.45;
+  letter-spacing: 0.01em;
+  overflow-wrap: anywhere;
+  box-shadow: var(--shadow-soft);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
+}
+
+.idraw-tooltip.is-visible {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 /* ---------- 拖入文件 ---------- */

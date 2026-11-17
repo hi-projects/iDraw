@@ -1,6 +1,16 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '@shared/ipc'
-import type { DiscardChoice, MenuCommand, SaveFileDialogOptions, WindowApi } from '@shared/api'
+import type {
+  DiscardChoice,
+  MenuCommand,
+  RecentEntry,
+  RecentKind,
+  SaveFileDialogOptions,
+  WindowApi,
+  WorkspaceApi,
+  WorkspaceCanvasEntry,
+  WorkspaceInfo
+} from '@shared/api'
 
 function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
   const listener = (_e: unknown, payload: T): void => cb(payload)
@@ -26,14 +36,45 @@ async function request<T>(channel: string, ...args: unknown[]): Promise<T> {
   }
 }
 
+const workspace: WorkspaceApi = {
+  selectDirectory: () => request<string | null>(IPC.WorkspacePickDirectory),
+  read: (dir: string) => request<WorkspaceInfo>(IPC.WorkspaceRead, { dir }),
+  createCanvas: (dir: string, name: string, content: string) =>
+    request<WorkspaceCanvasEntry>(IPC.WorkspaceCreateCanvas, { dir, name, content }),
+  renameCanvas: (dir: string, from: string, name: string) =>
+    request<WorkspaceCanvasEntry>(IPC.WorkspaceRenameCanvas, { dir, from, name }),
+  deleteCanvas: (dir: string, relPath: string) =>
+    request<void>(IPC.WorkspaceDeleteCanvas, { dir, relPath }),
+  confirmDeleteCanvas: (name: string) =>
+    request<boolean>(IPC.WorkspaceConfirmDelete, { name }),
+  recents: () => request<RecentEntry[]>(IPC.WorkspaceRecents),
+  pruneRecents: () => request<RecentEntry[]>(IPC.WorkspacePruneRecents),
+  touchWorkspace: (dir: string) => request<void>(IPC.WorkspaceTouch, { dir }),
+  touchFile: (path: string) => request<void>(IPC.WorkspaceTouchFile, { path }),
+  forget: (kind: RecentKind, path: string) =>
+    request<void>(IPC.WorkspaceForget, { kind, path })
+}
+
 const api: WindowApi = {
   openFileDialog: () => request<string | null>(IPC.FileOpenDialog),
   saveFileDialog: (o: SaveFileDialogOptions) => request<string | null>(IPC.FileSaveDialog, o),
   readFile: (path: string) => request<string>(IPC.FileRead, path),
   writeFile: (path: string, content: string) => request<void>(IPC.FileWrite, { path, content }),
+  writeFileSync: (path: string, content: string) => {
+    const ok = ipcRenderer.sendSync(IPC.FileWriteSync, { path, content })
+    if (!ok) throw new Error('同步保存失败')
+  },
   writeFileBytes: (path: string, data: Uint8Array) => request<void>(IPC.FileWriteBytes, { path, data }),
   confirmDiscard: (fileName: string) => request<DiscardChoice>(IPC.ConfirmDiscard, { fileName }),
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
+  platform: process.platform,
+  minimizeWindow: () => ipcRenderer.send(IPC.WindowMinimize),
+  closeWindow: () => ipcRenderer.send(IPC.WindowClose),
+  maximizeWindow: () => ipcRenderer.send(IPC.WindowMaximize),
+  unmaximizeWindow: () => ipcRenderer.send(IPC.WindowUnmaximize),
+  onCloseRequested: (cb: () => void) => subscribe(IPC.WindowCloseRequested, cb),
+  confirmClose: (allow: boolean) => ipcRenderer.send(IPC.WindowCloseDecision, allow),
+  workspace,
   onMenuCommand: (cb: (command: MenuCommand) => void) =>
     subscribe<MenuCommand>(IPC.MenuCommand, cb),
   takePendingOpenFile: () => request<string | null>(IPC.TakePendingOpenFile),

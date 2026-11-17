@@ -20,7 +20,7 @@ import {
   DEFAULT_SIZE,
   cloneEdge,
   cloneNode,
-  defaultNodeStyle,
+  newNodeStyle,
   emptyDoc,
   findEdge,
   findNode,
@@ -40,8 +40,8 @@ import {
 } from './clipboard'
 import { renderPng } from './png'
 import { templateDoc, type TemplateKind } from './templates'
-import { textPadding } from './shapes'
-import { lineHeightOf } from './textMetrics'
+import { layoutNodeText, textPadding } from './shapes'
+import { baselineOffset, lineHeightOf } from './textMetrics'
 import type { CanvasRuntimeHost } from './host'
 import { stripExtension } from '@shared/path'
 
@@ -51,6 +51,16 @@ export type CanvasOrderMode = 'front' | 'back' | 'forward' | 'backward'
 
 /** 网格显示偏好:同一会话内新建/切换文档时沿用 */
 let gridPreference = true
+
+/**
+ * 文字浮层底色:优先贴合节点自己的填充色;无填充/连线则取主题画布底色。
+ * 深色主题下不会再出现白底 + 浅色字的不可读组合。
+ */
+function editorBackground(fill?: string): string {
+  if (fill && fill !== 'none' && fill !== 'transparent') return fill
+  const paper = getComputedStyle(document.documentElement).getPropertyValue('--bg-editor').trim()
+  return paper || '#ffffff'
+}
 
 export interface CanvasUiState {
   tool: CanvasTool
@@ -603,7 +613,7 @@ export class CanvasRuntime {
       w: rect.w,
       h: rect.h,
       text,
-      style: defaultNodeStyle()
+      style: newNodeStyle()
     }
     if (shape === 'text') {
       node.style.fill = 'none'
@@ -788,29 +798,40 @@ export class CanvasRuntime {
     if (node) {
       const p = this.renderer!.screenOf(node.x, node.y)
       const pad = textPadding(node.shape)
+      const layout = layoutNodeText(node)
+      // 文字块在节点内可能垂直居中/贴底;把这段偏移做进 textarea 的上内边距,
+      // 输入中的文字才会和最终 SVG 里的位置一致
+      const blockTop = layout.y - baselineOffset(node.style.fontSize)
       ta.style.left = `${p.x + pad.x * scale}px`
       ta.style.top = `${p.y + pad.y * scale}px`
       ta.style.width = `${Math.max(48, (node.w - pad.x * 2) * scale)}px`
       ta.style.height = `${Math.max(28, (node.h - pad.y * 2) * scale)}px`
+      ta.style.paddingTop = `${Math.max(0, (blockTop - pad.y) * scale)}px`
+      ta.style.fontFamily = layout.fontFamily
       ta.style.fontSize = `${node.style.fontSize * scale}px`
       ta.style.lineHeight = `${lineHeightOf(node.style.fontSize) * scale}px`
       ta.style.textAlign = node.style.align
       ta.style.color = node.style.color
+      ta.style.background = editorBackground(node.style.fill)
       ta.style.fontWeight = node.style.bold ? '600' : '400'
       ta.style.fontStyle = node.style.italic ? 'italic' : 'normal'
+      // 文本形状不自动折行,和最终渲染一致
+      if (node.shape === 'text') ta.wrap = 'off'
       initial = node.text
       selectAll = node.text === '' || node.text === '文字'
     } else if (edge) {
       const g = edgeGeometry(edge, this.doc)
       const p = this.renderer!.screenOf(g.mid.x, g.mid.y)
+      const edgeLine = Math.round(edge.style.fontSize * 1.4)
       ta.style.left = `${p.x - 90 * scale}px`
-      ta.style.top = `${p.y - 16 * scale}px`
+      ta.style.top = `${p.y - (4 + baselineOffset(edge.style.fontSize)) * scale}px`
       ta.style.width = `${180 * scale}px`
       ta.style.height = `${32 * scale}px`
       ta.style.fontSize = `${edge.style.fontSize * scale}px`
-      ta.style.lineHeight = `${lineHeightOf(edge.style.fontSize) * scale}px`
+      ta.style.lineHeight = `${edgeLine * scale}px`
       ta.style.textAlign = 'center'
       ta.style.color = edge.style.color
+      ta.style.background = editorBackground()
       initial = edge.label
       selectAll = true
     }

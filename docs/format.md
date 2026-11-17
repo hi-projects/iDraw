@@ -52,8 +52,8 @@ iDraw 自己的编辑信息（节点 id、锚点、路由方式、文字逻辑�
 - 根节点必须有 `data-idraw-canvas="1"`。**没有这个标记的 SVG 一律只读预览**，iDraw 不会保存
   或改写它。
 - `data-idraw-version` 是格式版本，当前为 `1`。
-- 背景页是一个白色 `<rect data-idraw-page="1">`；画布内容固定浅色纸面，不跟随应用深色主题，
-  保证在任意查看器里颜色一致。
+- 背景页是一个白色 `<rect data-idraw-page="1">`；文件本身固定浅色纸面，不跟随应用深色主题，
+  保证在任意查看器里颜色一致（编辑区的无限画布背景会跟随主题，但保存出来的文件仍是白底）。
 - **边层在节点层之前**，所以连线和标签不会被形状里的文字盖住。
 - 样式全部写成 presentation attributes（`fill`、`stroke`、`stroke-width`、
   `stroke-dasharray` 等），**不使用 `<style>` 或 class**。外部软件不会因为选择器、层叠顺序
@@ -68,7 +68,7 @@ iDraw 自己的几何以 `data-idraw-*` 为准。
 | 属性 | 含义 |
 |---|---|
 | `data-idraw-node` | 节点 id，画布内唯一 |
-| `data-idraw-shape` | `rect` / `roundRect` / `ellipse` / `diamond` / `parallelogram` / `hexagon` / `cylinder` / `document` / `text` |
+| `data-idraw-shape` | `rect` / `roundRect` / `ellipse` / `diamond` / `parallelogram` / `hexagon` / `cylinder` / `document` / `triangle` / `rightTriangle` / `pentagon` / `octagon` / `star` / `arrow` / `plus` / `text` |
 | `data-idraw-x` / `data-idraw-y` | 节点左上角的世界坐标（权威） |
 | `data-idraw-w` / `data-idraw-h` | 节点宽高（权威） |
 | `data-idraw-align` | 文字水平对齐 `left` / `center` / `right` |

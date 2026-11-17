@@ -76,11 +76,11 @@ function flowchart(): CanvasDoc {
   return {
     viewBox: { x: 0, y: 0, w: PAGE_WIDTH, h: PAGE_HEIGHT },
     nodes: [
-      node('n1', 'ellipse', '开始', x, 100, { fill: '#eef2ff' }),
+      node('n1', 'ellipse', '开始', x, 100, { fill: '#e6f4f1' }),
       node('n2', 'roundRect', '读取输入', x, 220),
       node('n3', 'diamond', '是否有效?', x - 10, 340, { w: 180, h: 100, fill: '#fef9c3' }),
       node('n4', 'roundRect', '处理数据', x, 500),
-      node('n5', 'ellipse', '结束', x, 620, { fill: '#eef2ff' })
+      node('n5', 'ellipse', '结束', x, 620, { fill: '#e6f4f1' })
     ],
     edges: [
       edge('e1', 'n1', 'n2'),
@@ -95,7 +95,7 @@ function architecture(): CanvasDoc {
   return {
     viewBox: { x: 0, y: 0, w: PAGE_WIDTH, h: PAGE_HEIGHT },
     nodes: [
-      node('n1', 'roundRect', '客户端', 120, 420, { fill: '#eef2ff' }),
+      node('n1', 'roundRect', '客户端', 120, 420, { fill: '#e6f4f1' }),
       node('n2', 'hexagon', 'API 网关', 400, 420),
       node('n3', 'rect', '业务服务', 690, 340),
       node('n4', 'rect', '数据服务', 690, 500),

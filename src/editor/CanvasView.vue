@@ -10,7 +10,10 @@ import { pushNotice } from './notice'
 import CanvasStylePanel from './CanvasStylePanel.vue'
 import CanvasWelcome from './CanvasWelcome.vue'
 
-const props = defineProps<{ runtime: CanvasRuntime; welcome?: boolean }>()
+const props = withDefaults(defineProps<{ runtime: CanvasRuntime; welcome?: boolean }>(), {
+  // Boolean prop 缺省时 Vue 会转成 false;插件外壳不传 welcome,必须在网关处默认 true
+  welcome: true
+})
 
 const host = ref<HTMLElement | null>(null)
 /** 用户点了「空白画布」后不再弹出引导卡片,把画布让出来 */

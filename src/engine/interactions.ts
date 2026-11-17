@@ -16,6 +16,7 @@ import {
   cloneNode,
   cloneEdge,
   edgesOf,
+  newEdgeStyle,
   newId
 } from './model'
 import {
@@ -822,13 +823,7 @@ export class Interactions {
       routing: 'orthogonal' as const,
       arrow: 'end' as const,
       label: '',
-      style: {
-        stroke: '#4b5563',
-        strokeWidth: 1.5,
-        dash: false,
-        fontSize: 13,
-        color: '#4b5563'
-      }
+      style: newEdgeStyle()
     }
     doc.edges.push(edge)
     this.host.setSelection([edge.id])

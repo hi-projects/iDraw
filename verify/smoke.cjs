@@ -16,6 +16,8 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'idraw-smoke-'))
 const SAVED = path.join(TMP, 'diagram.svg')
 const FOREIGN = path.join(TMP, 'foreign.svg')
 const PNG = path.join(TMP, 'diagram.png')
+const WORKSPACE = path.join(TMP, 'workspace')
+fs.mkdirSync(WORKSPACE)
 
 fs.writeFileSync(
   FOREIGN,
@@ -24,6 +26,29 @@ fs.writeFileSync(
 
 let savedContent = null
 let pngWritten = false
+let writeCalls = 0
+let recents = []
+
+function readWorkspaceStub(dir) {
+  const canvases = []
+  const walk = (current, relDir) => {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      if (entry.name.startsWith('.')) continue
+      const relPath = relDir ? `${relDir}/${entry.name}` : entry.name
+      if (entry.isDirectory()) walk(path.join(current, entry.name), relPath)
+      else if (entry.isFile() && /\.svg$/i.test(entry.name)) {
+        canvases.push({ relPath, name: entry.name })
+      }
+    }
+  }
+  walk(dir, '')
+  canvases.sort((a, b) => a.relPath.localeCompare(b.relPath))
+  return { dir, name: path.basename(dir), canvases }
+}
+
+function canvasNameOf(raw) {
+  return /\.svg$/i.test(raw) ? raw : `${raw}.svg`
+}
 
 ipcMain.handle('app:take-pending-open-file', () => null)
 ipcMain.handle('app:confirm-discard', () => 'discard')
@@ -33,10 +58,62 @@ ipcMain.handle('file:read', (_e, file) => fs.readFileSync(file, 'utf8'))
 ipcMain.handle('file:write', (_e, payload) => {
   fs.writeFileSync(payload.path, payload.content)
   savedContent = payload.content
+  writeCalls += 1
+})
+ipcMain.on('file:write-sync', (event, payload) => {
+  fs.writeFileSync(payload.path, payload.content)
+  event.returnValue = true
 })
 ipcMain.handle('file:write-bytes', (_e, payload) => {
   fs.writeFileSync(payload.path, Buffer.from(payload.data))
   pngWritten = true
+})
+
+// ---- 仓库 IPC 的桩实现:用真实文件系统,便于断言自动保存写盘 ----
+ipcMain.handle('workspace:pick-directory', () => WORKSPACE)
+ipcMain.handle('workspace:read', (_e, payload) => readWorkspaceStub(payload.dir))
+ipcMain.handle('workspace:create-canvas', (_e, payload) => {
+  const name = canvasNameOf(payload.name)
+  fs.writeFileSync(path.join(payload.dir, name), payload.content, { flag: 'wx' })
+  return { relPath: name, name }
+})
+ipcMain.handle('workspace:rename-canvas', (_e, payload) => {
+  const name = canvasNameOf(payload.name)
+  const target = path.join(payload.dir, name)
+  fs.renameSync(path.join(payload.dir, payload.from), target)
+  return { relPath: name, name }
+})
+ipcMain.handle('workspace:delete-canvas', (_e, payload) => {
+  fs.unlinkSync(path.join(payload.dir, payload.relPath))
+})
+ipcMain.handle('workspace:confirm-delete', () => true)
+ipcMain.handle('workspace:recents', () => recents)
+ipcMain.handle('workspace:prune-recents', () =>
+  recents.filter(entry => {
+    try {
+      const info = fs.statSync(entry.path)
+      return entry.kind === 'workspace' ? info.isDirectory() : info.isFile()
+    } catch {
+      return false
+    }
+  })
+)
+ipcMain.handle('workspace:touch', (_e, payload) => {
+  recents = [
+    { kind: 'workspace', path: payload.dir },
+    ...recents.filter(entry => !(entry.kind === 'workspace' && entry.path === payload.dir))
+  ]
+})
+ipcMain.handle('workspace:touch-file', (_e, payload) => {
+  recents = [
+    { kind: 'file', path: payload.path },
+    ...recents.filter(entry => !(entry.kind === 'file' && entry.path === payload.path))
+  ]
+})
+ipcMain.handle('workspace:forget', (_e, payload) => {
+  recents = recents.filter(
+    entry => !(entry.kind === payload.kind && entry.path === payload.path)
+  )
 })
 
 const failures = []
@@ -89,28 +166,82 @@ async function main() {
   })
 
   await win.loadFile(path.join(ROOT, 'out/renderer/index.html'))
-  await waitFor(wc, "!!document.querySelector('.canvas-pane')")
+  await waitFor(wc, "!!document.querySelector('.workspace-picker')")
 
-  console.log('[1] 启动页')
-  check('启动页引导卡片出现', await waitFor(wc, "!!document.querySelector('.canvas-new-card')"))
-  check('启动时还没有创建画布', await waitFor(wc, "!document.querySelector('.canvas-surface')"))
+  console.log('[1] 启动:仓库选择页')
+  check('启动页是仓库选择页', await waitFor(wc, "!!document.querySelector('.workspace-picker')"))
+  check(
+    '有新建/打开入口',
+    await waitFor(wc, "!!document.querySelector('.workspace-recent-add-slot button')")
+  )
+  check('启动时还没有创建画布', await js(wc, "!document.querySelector('.canvas-surface')"))
   check('窗口标题为 iDraw', (await js(wc, 'document.title')).includes('iDraw'))
 
-  console.log('[2] 新建空白画布并用形状工具创建 5 个节点')
-  await js(wc, "document.querySelector('.canvas-blank-btn')?.click()")
-  check('点击后进入编辑器', await waitFor(wc, "!!document.querySelector('.canvas-surface')"))
+  console.log('[2] 临时画布:用形状工具创建 5 个节点')
+  await js(wc, "document.querySelector('.workspace-recent-add-slot button').click()")
+  check('加号菜单出现', await waitFor(wc, "!!document.querySelector('.workspace-recent-empty-menu')"))
+  await js(wc, "document.querySelector('[data-action=temporary-canvas]').click()")
+  check('进入临时画布', await waitFor(wc, "!!document.querySelector('.canvas-surface')"))
+  await wait(150)
+  check(
+    '进入临时画布默认显示新建画布界面',
+    await waitFor(wc, "!!document.querySelector('.canvas-new-card')")
+  )
+  await js(wc, "document.querySelector('.canvas-blank-btn').click()")
+  check(
+    '选择空白画布后卡片收起',
+    await waitFor(wc, "!document.querySelector('.canvas-new-card')")
+  )
+  check(
+    '临时画布不显示工具栏新建按钮',
+    await js(wc, "!document.querySelector('.canvas-new-btn')")
+  )
+  check(
+    '左上角应用菜单已移除',
+    await js(wc, "!document.querySelector('.canvas-app-menu-btn')")
+  )
+  check(
+    '左下角全局菜单按钮存在',
+    await js(wc, "!!document.querySelector('.idraw-corner-btn')")
+  )
+  await js(wc, "document.querySelector('.idraw-corner-btn').click()")
+  check('左下角菜单出现', await waitFor(wc, "!!document.querySelector('.idraw-corner-menu')"))
+  check(
+    '菜单包含保存/导出/撤销/重做/设置',
+    await js(wc, "document.querySelectorAll('.idraw-corner-menu-item').length === 5")
+  )
+  check(
+    '菜单含设置入口',
+    await js(wc, "!!document.querySelector('[data-action=open-settings]')")
+  )
+  check(
+    '画布操作与设置之间有分隔线',
+    await js(wc, "document.querySelectorAll('.idraw-corner-sep').length === 2")
+  )
+  await js(wc, "document.querySelector('.idraw-corner-mask').click()")
+  check('点击空白处关闭菜单', await js(wc, "!document.querySelector('.idraw-corner-menu')"))
+
+  await js(wc, `document.querySelector('[data-action=toggle-shapes]').click()`)
+  check('左侧形状面板滑出', await waitFor(wc, "!!document.querySelector('.shape-panel')"))
+  check(
+    '形状面板包含新增形状',
+    await js(
+      wc,
+      "['三角形','星形','箭头','十字'].every(label => [...document.querySelectorAll('.shape-item')].some(b => b.textContent.trim() === label))"
+    )
+  )
+  await js(wc, "document.querySelector('.shape-panel-close').click()")
+  check('关闭形状面板', await waitFor(wc, "!document.querySelector('.shape-panel')"))
+
   /** 选「形状 → 矩形」后在指定世界坐标点一下,生成一个默认尺寸的节点 */
   const placeRect = async (wx, wy) => {
+    await js(wc, `document.querySelector('[data-action=toggle-shapes]').click()`)
+    await waitFor(wc, "!!document.querySelector('.shape-panel')")
     await js(wc, `(() => {
-      const btn = [...document.querySelectorAll('.canvas-tool-btn')].find(b => b.textContent.trim() === '形状')
-      btn.click()
-    })()`)
-    await wait(40)
-    await js(wc, `(() => {
-      const item = [...document.querySelectorAll('.canvas-shape-item')].find(b => b.textContent.trim() === '矩形')
+      const item = [...document.querySelectorAll('.shape-item')].find(b => b.textContent.trim() === '矩形')
       item.click()
     })()`)
-    await wait(40)
+    await wait(80)
     await js(
       wc,
       `(() => {
@@ -181,6 +312,15 @@ async function main() {
     await waitFor(wc, "document.querySelectorAll('[data-idraw-edge]').length === 4")
   )
   check('修改后标题带脏点', (await js(wc, 'document.title')).startsWith('● '))
+
+  // 临时画布的核心承诺:不自动保存。等待超过自动保存延迟后,不应有写盘动作。
+  const writesBeforeIdle = writeCalls
+  await wait(1600)
+  check('临时画布不会自动保存', writeCalls === writesBeforeIdle, {
+    before: writesBeforeIdle,
+    after: writeCalls
+  })
+
   check(
     '外部 SVG 的脚本没有被执行',
     await js(wc, "!document.querySelector('.canvas-readonly-img')")
@@ -273,12 +413,17 @@ async function main() {
       savedContent.includes('data-idraw-node="n1"') &&
       !savedContent.includes('<style')
   )
+  check(
+    '新形状默认无填充',
+    savedOk && /data-idraw-shape="rect"[\s\S]{0,400}?fill="none"/.test(savedContent)
+  )
   const savedX = Number(/data-idraw-node="n1"[\s\S]*?data-idraw-x="([-\d.]+)"/.exec(savedContent)?.[1])
   check('保存的是拖动后的坐标', savedX === after.x, { savedX, after })
 
   console.log('[6] 新建并重新打开')
   wc.send('app:menu-command', 'file:new')
-  check('新建后回到启动页', await waitFor(wc, "!!document.querySelector('.canvas-new-card')"))
+  check('新建后是一张空白临时画布', await waitFor(wc, "!!document.querySelector('.canvas-new-card')"))
+  check('新建后仍在编辑器里', await js(wc, "!!document.querySelector('.canvas-surface')"))
   wc.send('app:open-file', SAVED)
   check(
     '重新打开恢复 5 个节点',
@@ -301,6 +446,10 @@ async function main() {
     (await js(wc, "document.querySelector('.canvas-readonly-bar')?.textContent || ''")).includes(
       '只读'
     )
+  )
+  check(
+    '只读文件仍能返回仓库选择',
+    await js(wc, "!!document.querySelector('.canvas-readonly-back')")
   )
 
   console.log('[8] 导出 PNG')
@@ -412,6 +561,186 @@ async function main() {
     await waitFor(wc, "document.querySelectorAll('[data-idraw-edge]').length >= 6")
   )
 
+  console.log('[11] 仓库:新建多张画布并自动保存')
+  wc.send('app:menu-command', 'file:open-workspace')
+  check(
+    '未保存修改弹窗出现',
+    await waitFor(wc, "!!document.querySelector('.idraw-dialog')")
+  )
+  check(
+    '弹窗使用应用内主题样式',
+    await js(
+      wc,
+      "getComputedStyle(document.querySelector('.idraw-dialog')).backgroundColor !== 'rgba(0, 0, 0, 0)'"
+    )
+  )
+  await js(wc, "document.querySelector('[data-dialog-value=discard]').click()")
+  check('回到仓库选择页', await waitFor(wc, "!!document.querySelector('.workspace-picker')"))
+  await waitFor(wc, "!!document.querySelector('.workspace-recent-add-slot button')")
+  await js(wc, "document.querySelector('.workspace-recent-add-slot button').click()")
+  check('加号菜单出现', await waitFor(wc, "!!document.querySelector('[data-action=open-workspace]')"))
+  await js(wc, "document.querySelector('[data-action=open-workspace]').click()")
+  check('打开仓库后出现侧栏', await waitFor(wc, "!!document.querySelector('.workspace-sidebar')"))
+  check('空仓库显示引导卡片', await waitFor(wc, "!!document.querySelector('.workspace-empty')"))
+  check(
+    '侧栏入口文案为新建文件',
+    await js(
+      wc,
+      "document.querySelector('[data-action=workspace-new-canvas]').textContent.includes('新建文件')"
+    )
+  )
+
+  await js(wc, "document.querySelector('[data-action=workspace-new-canvas]').click()")
+  check(
+    '点击新建文件出现输入框',
+    await waitFor(wc, "!!document.querySelector('[data-field=new-canvas-name]')")
+  )
+  await js(
+    wc,
+    `(() => {
+      const target = document.querySelector('.workspace-canvas-empty') ?? document.querySelector('.workspace-canvas-list')
+      target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+    })()`
+  )
+  check(
+    '点击别处关闭新建输入',
+    await waitFor(wc, "!document.querySelector('[data-field=new-canvas-name]')")
+  )
+
+  await js(wc, "document.querySelector('[data-action=workspace-new-canvas]').click()")
+  check('出现新建文件输入框', await waitFor(wc, "!!document.querySelector('[data-field=new-canvas-name]')"))
+  await js(
+    wc,
+    `(() => {
+      const input = document.querySelector('[data-field=new-canvas-name]')
+      input.value = '流程图'
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      // 名称已改成自定义值:点击别处应当直接创建,而不是必须按回车
+      document.querySelector('.workspace-canvas-list').dispatchEvent(
+        new PointerEvent('pointerdown', { bubbles: true })
+      )
+    })()`
+  )
+  check('点击别处用自定义名称创建画布', await waitFor(wc, "!!document.querySelector('.canvas-surface')"))
+  check(
+    '侧栏出现画布行',
+    await waitFor(wc, "!!document.querySelector('[data-rel-path=\"流程图.svg\"]')")
+  )
+  check('磁盘上创建了画布文件', fs.existsSync(path.join(WORKSPACE, '流程图.svg')))
+  check(
+    '仓库模式不显示工具栏新建按钮',
+    await js(wc, "!document.querySelector('.canvas-new-btn')")
+  )
+  check(
+    '齿轮位于画布区域左下角',
+    await js(
+      wc,
+      `(() => {
+        const btn = document.querySelector('.idraw-corner-btn')
+        const sidebar = document.querySelector('.workspace-sidebar')
+        if (!btn || !sidebar) return false
+        const left = parseFloat(getComputedStyle(btn).left)
+        return Math.abs(left - (sidebar.getBoundingClientRect().width + 18)) < 1
+      })()`
+    )
+  )
+
+  await js(wc, "document.querySelector('.canvas-blank-btn')?.click()")
+  await placeRect(400, 200)
+  check(
+    '仓库画布创建了节点',
+    await waitFor(wc, "document.querySelectorAll('[data-idraw-node]').length === 1")
+  )
+  const autoSaved = await (async () => {
+    const start = Date.now()
+    while (Date.now() - start < 6000) {
+      try {
+        const text = fs.readFileSync(path.join(WORKSPACE, '流程图.svg'), 'utf8')
+        if (text.includes('data-idraw-node')) return true
+      } catch {
+        /* 文件还没写完时继续等 */
+      }
+      await wait(100)
+    }
+    return false
+  })()
+  check('仓库画布编辑后自动保存(无需 Ctrl+S)', autoSaved)
+  check(
+    '状态栏显示自动保存',
+    (await js(wc, "document.querySelector('.idraw-statusbar')?.textContent || ''")).includes(
+      '自动保存'
+    )
+  )
+
+  // 再建一张,验证「一个仓库里能放多张画布」
+  await js(wc, "document.querySelector('[data-action=workspace-new-canvas]').click()")
+  await waitFor(wc, "!!document.querySelector('[data-field=new-canvas-name]')")
+  await js(
+    wc,
+    `(() => {
+      const input = document.querySelector('[data-field=new-canvas-name]')
+      input.value = '第二张'
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    })()`
+  )
+  check(
+    '仓库里有两张画布',
+    await waitFor(wc, "document.querySelectorAll('[data-rel-path]').length === 2")
+  )
+  check(
+    '画布行高度固定不抖动',
+    await js(
+      wc,
+      `(() => {
+        const rows = [...document.querySelectorAll('.workspace-canvas-row')]
+        if (rows.length < 2) return false
+        const first = rows[0].getBoundingClientRect().height
+        return rows.every(r => Math.abs(r.getBoundingClientRect().height - first) < 0.5)
+      })()`
+    )
+  )
+  check(
+    '行操作按钮占位但不常显',
+    await js(
+      wc,
+      `(() => {
+        const row = [...document.querySelectorAll('.workspace-canvas-row')].find(r => !r.classList.contains('active'))
+        const action = row?.querySelector('.workspace-row-action')
+        if (!action) return false
+        return getComputedStyle(action).visibility === 'hidden' && action.getBoundingClientRect().width > 0
+      })()`
+    )
+  )
+  check('第二张画布文件存在', fs.existsSync(path.join(WORKSPACE, '第二张.svg')))
+
+  await js(wc, "document.querySelector('[data-rel-path=\"流程图.svg\"]').click()")
+  check(
+    '切回第一张画布仍是刚才的内容',
+    await waitFor(wc, "document.querySelectorAll('[data-idraw-node]').length === 1")
+  )
+
+  await js(wc, "document.querySelector('[data-action=workspace-back]').click()")
+  check('从仓库返回选择页', await waitFor(wc, "!!document.querySelector('.workspace-picker')"))
+  check(
+    '选择页齿轮回到左下角',
+    await js(
+      wc,
+      "parseFloat(getComputedStyle(document.querySelector('.idraw-corner-btn')).left) === 18"
+    )
+  )
+  check(
+    '最近打开记住了这个仓库',
+    await waitFor(wc, "document.querySelectorAll('[data-action=recent-workspace]').length >= 1")
+  )
+  check(
+    '仓库卡片展示了内部画布缩略图',
+    await waitFor(
+      wc,
+      "document.querySelectorAll('[data-action=recent-workspace] img').length >= 2"
+    )
+  )
+
   const shot = path.join(TMP, 'shot.png')
   try {
     const image = await wc.capturePage()
@@ -420,6 +749,55 @@ async function main() {
   } catch {
     /* 无头环境偶尔截不到,不影响断言 */
   }
+
+  console.log('[12] 左下角菜单与主题切换')
+  check(
+    '旧设置浮标已移除',
+    await js(wc, "!document.querySelector('.idraw-fab')")
+  )
+  check('全局菜单按钮存在', await js(wc, "!!document.querySelector('.idraw-corner-btn')"))
+  await js(wc, "document.querySelector('.idraw-corner-btn').click()")
+  check('全局菜单出现', await waitFor(wc, "!!document.querySelector('.idraw-corner-menu')"))
+  await js(wc, "document.querySelector('[data-action=open-settings]').click()")
+  check(
+    '设置弹窗出现',
+    await waitFor(wc, "!!document.querySelector('.idraw-settings-dialog')")
+  )
+  check(
+    '设置面板有左侧分区',
+    await js(wc, "!!document.querySelector('.idraw-settings-sidebar')")
+  )
+  check(
+    '设置分区包含外观/编辑器/关于',
+    await js(wc, "document.querySelectorAll('.idraw-settings-nav-item').length === 3")
+  )
+  await js(wc, "document.querySelectorAll('.idraw-theme-option')[2].click()")
+  check(
+    '深色主题立即生效',
+    await waitFor(wc, "document.documentElement.dataset.theme === 'dark'")
+  )
+  check('主题偏好已写入 localStorage', (await js(wc, "localStorage.getItem('idraw-theme')")) === 'dark')
+  await js(wc, "document.querySelectorAll('.idraw-theme-option')[0].click()")
+  check(
+    '恢复跟随系统',
+    await waitFor(wc, "localStorage.getItem('idraw-theme') === 'system'")
+  )
+  await js(wc, "document.querySelectorAll('.idraw-settings-nav-item')[1].click()")
+  check(
+    '编辑器设置包含网格与吸附开关',
+    await js(wc, "document.querySelectorAll('.idraw-settings-switch').length === 2")
+  )
+  check(
+    '编辑器设置不再显示画布标题',
+    await js(wc, "!document.querySelector('.idraw-settings-section-title')")
+  )
+  check(
+    '编辑器开关之间没有分割线',
+    await js(
+      wc,
+      "getComputedStyle(document.querySelector('.idraw-settings-row')).borderBottomWidth === '0px'"
+    )
+  )
 
   console.log('')
   if (failures.length) {

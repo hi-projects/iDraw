@@ -1,0 +1,154 @@
+/* ---------- 应用内确认弹窗 ---------- */
+
+.idraw-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: color-mix(in oklch, var(--bg-app) 55%, transparent);
+  backdrop-filter: blur(4px);
+}
+
+.idraw-dialog {
+  width: 430px;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--bg-toolbar);
+  box-shadow: var(--shadow-float);
+  outline: none;
+  overflow: hidden;
+  animation: idraw-dialog-in 0.16s ease both;
+}
+
+@keyframes idraw-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.idraw-dialog-main {
+  display: flex;
+  gap: 14px;
+  padding: 20px 20px 18px;
+}
+
+.idraw-dialog-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+}
+
+.idraw-dialog-icon.warning {
+  background: color-mix(in srgb, var(--warn) 15%, transparent);
+  color: var(--warn);
+}
+
+.idraw-dialog-icon.info {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.idraw-dialog-text {
+  min-width: 0;
+}
+
+.idraw-dialog-title {
+  margin: 2px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text-primary);
+}
+
+.idraw-dialog-message {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.idraw-dialog-detail {
+  margin: 5px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
+
+.idraw-dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 18px 16px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in oklch, var(--bg-app) 60%, transparent);
+}
+
+.idraw-dialog-btn {
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-control);
+  color: var(--text-primary);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    border-color 0.14s ease,
+    background-color 0.14s ease,
+    color 0.14s ease;
+}
+
+.idraw-dialog-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.idraw-dialog-btn.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.idraw-dialog-btn.primary:hover {
+  border-color: var(--accent-hover);
+  background: var(--accent-hover);
+  color: #ffffff;
+}
+
+.idraw-dialog-btn.danger {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: #ffffff;
+}
+
+.idraw-dialog-btn.danger:hover {
+  border-color: color-mix(in srgb, var(--danger) 82%, #000000);
+  background: color-mix(in srgb, var(--danger) 82%, #000000);
+  color: #ffffff;
+}
+
+.idraw-dialog-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.idraw-dialog-btn.danger:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 28%, transparent);
+}

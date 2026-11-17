@@ -20,6 +20,13 @@ export type ShapeKind =
   | 'hexagon'
   | 'cylinder'
   | 'document'
+  | 'triangle'
+  | 'rightTriangle'
+  | 'pentagon'
+  | 'octagon'
+  | 'star'
+  | 'arrow'
+  | 'plus'
   | 'text'
 
 export interface NodeStyle {
@@ -116,6 +123,13 @@ export const DEFAULT_SIZE: Record<ShapeKind, { w: number; h: number }> = {
   hexagon: { w: 160, h: 64 },
   cylinder: { w: 140, h: 80 },
   document: { w: 160, h: 72 },
+  triangle: { w: 160, h: 80 },
+  rightTriangle: { w: 160, h: 80 },
+  pentagon: { w: 120, h: 120 },
+  octagon: { w: 120, h: 120 },
+  star: { w: 120, h: 120 },
+  arrow: { w: 160, h: 64 },
+  plus: { w: 100, h: 100 },
   text: { w: 140, h: 40 }
 }
 
@@ -147,6 +161,35 @@ export function defaultNodeStyle(): NodeStyle {
 
 export function defaultEdgeStyle(): EdgeStyle {
   return { ...EDGE_DEFAULTS }
+}
+
+/** 深色画布上新插入形状的描边/文字默认值;填充统一为 none,见 newNodeStyle */
+export const DARK_NODE_DEFAULTS: NodeStyle = {
+  ...NODE_DEFAULTS,
+  fill: '#2a2c35',
+  stroke: '#8f94a3',
+  color: '#ececf1'
+}
+
+export const DARK_EDGE_DEFAULTS: EdgeStyle = {
+  ...EDGE_DEFAULTS,
+  stroke: '#8f94a3',
+  color: '#a6a7b3'
+}
+
+function isDarkTheme(): boolean {
+  return typeof document !== 'undefined' && document.documentElement.dataset.theme === 'dark'
+}
+
+/** 新建节点时按当前主题取默认样式(打开的文件仍保留文件里的颜色) */
+export function newNodeStyle(): NodeStyle {
+  // 默认不填充:形状靠描边识别,主题切换时也不会出现一块与环境冲突的实色
+  return { ...(isDarkTheme() ? DARK_NODE_DEFAULTS : NODE_DEFAULTS), fill: 'none' }
+}
+
+/** 新建连线时按当前主题取默认样式 */
+export function newEdgeStyle(): EdgeStyle {
+  return { ...(isDarkTheme() ? DARK_EDGE_DEFAULTS : EDGE_DEFAULTS) }
 }
 
 export function emptyDoc(): CanvasDoc {

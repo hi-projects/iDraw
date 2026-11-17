@@ -50,6 +50,10 @@ function applyFill(e: Event): void {
   patchNode('fill', str(e))
 }
 
+function toggleNoFill(e: Event): void {
+  patchNode('fill', checked(e) ? 'none' : '#ffffff')
+}
+
 function applyStroke(e: Event): void {
   patchNode('stroke', str(e))
 }
@@ -141,7 +145,16 @@ function distribute(mode: CanvasDistributeMode): void {
     <template v-if="ns">
       <div class="canvas-style-row">
         <label class="canvas-style-label">填充</label>
-        <input type="color" :value="ns.fill" @change="applyFill" />
+        <input
+          type="color"
+          :value="ns.fill === 'none' ? '#ffffff' : ns.fill"
+          :disabled="ns.fill === 'none'"
+          @change="applyFill"
+        />
+        <label class="canvas-style-check">
+          <input type="checkbox" :checked="ns.fill === 'none'" @change="toggleNoFill" />
+          无填充
+        </label>
         <label class="canvas-style-label">描边</label>
         <input type="color" :value="ns.stroke" @change="applyStroke" />
       </div>

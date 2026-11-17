@@ -60,19 +60,6 @@
         "title": "重做画布操作",
         "category": "iDraw"
       }
-    ],
-    "imark.actions": [
-      {
-        "command": "idraw.canvas.open",
-        "label": "打开画布",
-        "scope": "global",
-        "primary": true
-      },
-      {
-        "command": "idraw.canvas.new",
-        "label": "新建画布",
-        "scope": "global"
-      }
     ]
   }
 }

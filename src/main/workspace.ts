@@ -27,7 +27,8 @@ async function walkCanvasFiles(
   root: string,
   relDir: string,
   out: WorkspaceCanvasEntry[],
-  depth: number
+  depth: number,
+  recursive: boolean
 ): Promise<void> {
   if (depth > MAX_DEPTH) return
   let entries
@@ -38,13 +39,14 @@ async function walkCanvasFiles(
     return
   }
   for (const entry of entries) {
-    if (entry.name.startsWith('.')) continue
+    // 不按点前缀过滤:仓库里可能有 `.foo.svg` 或 `.assets/` 这类隐藏文件/目录,
+    // 用户需要能在画布列表里看到它们。真正跳过的只有 IGNORED_DIRS 里的工具目录。
     // 不跟随符号链接:仓库根目录之外的文件不应该出现在列表里
     if (entry.isSymbolicLink()) continue
     const relPath = relDir ? `${relDir}/${entry.name}` : entry.name
     if (entry.isDirectory()) {
-      if (!IGNORED_DIRS.has(entry.name)) {
-        await walkCanvasFiles(root, relPath, out, depth + 1)
+      if (recursive && !IGNORED_DIRS.has(entry.name)) {
+        await walkCanvasFiles(root, relPath, out, depth + 1, recursive)
       }
     } else if (entry.isFile() && /\.svg$/i.test(entry.name)) {
       out.push({ relPath, name: entry.name })
@@ -52,13 +54,20 @@ async function walkCanvasFiles(
   }
 }
 
-/** 递归列出仓库里的 `.svg` 画布;目录不存在或不是目录时抛错 */
-export async function readWorkspace(dir: string): Promise<WorkspaceInfo> {
+/**
+ * 列出仓库里的 `.svg` 画布;目录不存在或不是目录时抛错。
+ * 默认只读仓库当前目录;`recursive` 为 true 时才递归子目录
+ * (设置 → 布局 → 显示子目录中的 SVG)。
+ */
+export async function readWorkspace(
+  dir: string,
+  options?: { recursive?: boolean }
+): Promise<WorkspaceInfo> {
   const root = resolve(dir)
   const info = await stat(root)
   if (!info.isDirectory()) throw new Error('选择的路径不是文件夹')
   const canvases: WorkspaceCanvasEntry[] = []
-  await walkCanvasFiles(root, '', canvases, 0)
+  await walkCanvasFiles(root, '', canvases, 0, options?.recursive === true)
   canvases.sort((a, b) =>
     a.relPath.localeCompare(b.relPath, 'zh-CN', { numeric: true, sensitivity: 'base' })
   )

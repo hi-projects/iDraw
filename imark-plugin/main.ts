@@ -413,10 +413,21 @@ export class CanvasPlugin {
     }
     const value = await imark.window.showInputBox({
       title: '新建画布',
-      prompt: '输入画布名称，会保存到仓库的 .assets 目录',
-      placeHolder: '流程图.svg',
-      validateInput: text =>
-        normalizeRel(withExtension(text.trim(), 'svg')) ? undefined : '名称不能为空，且不能包含 ..'
+      prompt: '画布会保存到仓库的 .assets 目录',
+      // 只是说明,收进标题旁的小问号;正文留给输入框
+      promptAsHelp: true,
+      placeHolder: '输入画布名称',
+      // 名字非法或同名文件已存在都直接标在输入框下,不关掉对话框再弹通知
+      validateInput: async text => {
+        const rel = normalizeRel(withExtension(text.trim(), 'svg'))
+        if (!rel) return '名称不能为空，且不能包含 ..'
+        const name = rel.replace(/^\.assets\//, '')
+        const target = this.uriFromRel(root, `.assets/${name}`)
+        if (await this.exists(target.fsPath)) {
+          return `“${basename(target.fsPath)}”已存在，换一个名称。`
+        }
+        return undefined
+      }
     })
     if (!value) return null
     const rel = normalizeRel(withExtension(value.trim(), 'svg'))
@@ -425,6 +436,7 @@ export class CanvasPlugin {
     // 用户把 `.assets/` 也敲进来时不重复嵌套。
     const name = rel.replace(/^\.assets\//, '')
     const target = this.uriFromRel(root, `.assets/${name}`)
+    // 正常路径已被 validateInput 拦下;这里只兜底校验通道失效(超时)的情况
     if (await this.exists(target.fsPath)) {
       await imark.window.showWarningMessage(`“${basename(target.fsPath)}”已存在，换一个名称。`)
       return null

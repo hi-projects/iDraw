@@ -57,7 +57,7 @@ export interface InteractionHost {
   renderFast(nodeIds: ReadonlySet<string>, edgeIds: ReadonlySet<string>): void
   renderOverlay(): void
   setGuides(guides: Guide[]): void
-  setCreateRect(rect: Rect | null): void
+  setCreateRect(rect: Rect | null, shape?: ShapeKind | null): void
   setMarquee(rect: Rect | null): void
   setPreview(path: string | null, anchorNode: CanvasNode | null): void
   /** 记录一次已作用到场景上的修改(不再重复应用 redo) */
@@ -614,7 +614,7 @@ export class Interactions {
               h: Math.max(GRID_SIZE, snapToGrid(rect.h, GRID_SIZE))
             }
           }
-          this.host.setCreateRect(rect)
+          this.host.setCreateRect(rect, this.host.pendingShape)
         }
         this.host.renderOverlay()
         break

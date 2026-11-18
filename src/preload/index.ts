@@ -9,6 +9,7 @@ import type {
   WindowApi,
   WorkspaceApi,
   WorkspaceCanvasEntry,
+  WorkspaceDirListing,
   WorkspaceInfo
 } from '@shared/api'
 
@@ -38,7 +39,10 @@ async function request<T>(channel: string, ...args: unknown[]): Promise<T> {
 
 const workspace: WorkspaceApi = {
   selectDirectory: () => request<string | null>(IPC.WorkspacePickDirectory),
-  read: (dir: string) => request<WorkspaceInfo>(IPC.WorkspaceRead, { dir }),
+  listDirectories: (dir: string | null) =>
+    request<WorkspaceDirListing>(IPC.WorkspaceListDirs, dir),
+  read: (dir: string, options?: { recursive?: boolean }) =>
+    request<WorkspaceInfo>(IPC.WorkspaceRead, { dir, recursive: options?.recursive === true }),
   createCanvas: (dir: string, name: string, content: string) =>
     request<WorkspaceCanvasEntry>(IPC.WorkspaceCreateCanvas, { dir, name, content }),
   renameCanvas: (dir: string, from: string, name: string) =>

@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, screen } from 'electron'
 import type { MenuItemConstructorOptions } from 'electron'
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { IPC } from '@shared/ipc'
@@ -9,6 +9,7 @@ import type {
   MenuCommand,
   RecentKind,
   SaveFileDialogOptions,
+  WorkspaceDirListing,
   WorkspaceInfo
 } from '@shared/api'
 import {
@@ -200,7 +201,8 @@ function registerIpc(): void {
       title: '打开画布',
       defaultPath: lastDir ?? undefined,
       filters: [{ name: 'SVG 画布', extensions: ['svg'] }],
-      properties: ['openFile' as const]
+      // showHiddenFiles:让文件对话框显示点前缀文件(Linux 走 GTK 的 show-hidden)
+      properties: ['openFile' as const, 'showHiddenFiles' as const]
     }
     const result = mainWindow
       ? await dialog.showOpenDialog(mainWindow, options)
@@ -318,8 +320,10 @@ function registerIpc(): void {
     const options = {
       title: '打开仓库文件夹',
       defaultPath: lastDir ?? app.getPath('documents'),
-      // createDirectory 让 macOS 的对话框也能新建文件夹;Windows/Linux 自带新建按钮
-      properties: ['openDirectory' as const, 'createDirectory' as const]
+      // createDirectory 让 macOS 的对话框也能新建文件夹;Windows/Linux 自带新建按钮。
+      // showHiddenFiles 只在 macOS/Windows 有效:Electron 43 起已移除 Linux 支持,
+      // 所以「打开文件夹」默认改走应用内浏览器(IPC.WorkspaceListDirs)。
+      properties: ['openDirectory' as const, 'createDirectory' as const, 'showHiddenFiles' as const]
     }
     const result = mainWindow
       ? await dialog.showOpenDialog(mainWindow, options)
@@ -329,10 +333,50 @@ function registerIpc(): void {
     return result.filePaths[0]
   })
 
+  /**
+   * 应用内文件夹浏览器:列出一级子目录,包含点前缀的隐藏目录。
+   * 原生对话框在 Linux 上无法默认显示隐藏目录,仓库选择走这条 IPC。
+   */
+  ipcMain.handle(
+    IPC.WorkspaceListDirs,
+    async (_event, dir: string | null): Promise<WorkspaceDirListing> => {
+      const root = resolve(dir || lastDir || app.getPath('documents'))
+      try {
+        const info = await stat(root)
+        if (!info.isDirectory()) throw new Error('不是文件夹')
+      } catch {
+        throw new Error(`无法打开文件夹:${root}`)
+      }
+      const entries = await readdir(root, { withFileTypes: true })
+      const byName = (a: { name: string }, b: { name: string }): number =>
+        a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' })
+      const dirs = entries
+        .filter(entry => entry.isDirectory() && !entry.isSymbolicLink())
+        .map(entry => ({
+          name: entry.name,
+          path: join(root, entry.name),
+          hidden: entry.name.startsWith('.')
+        }))
+        .sort(byName)
+      // 同一层的 .svg 文件也列出来:进入隐藏子目录后可以直接把画布打开
+      const files = entries
+        .filter(entry => entry.isFile() && /\.svg$/i.test(entry.name))
+        .map(entry => ({
+          name: entry.name,
+          path: join(root, entry.name),
+          hidden: entry.name.startsWith('.')
+        }))
+        .sort(byName)
+      lastDir = root
+      const parent = dirname(root)
+      return { dir: root, parent: parent === root ? null : parent, dirs, files }
+    }
+  )
+
   ipcMain.handle(
     IPC.WorkspaceRead,
-    async (_event, payload: { dir: string }): Promise<WorkspaceInfo> => {
-      return readWorkspace(payload.dir)
+    async (_event, payload: { dir: string; recursive?: boolean }): Promise<WorkspaceInfo> => {
+      return readWorkspace(payload.dir, { recursive: payload.recursive === true })
     }
   )
 

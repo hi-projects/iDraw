@@ -30,6 +30,7 @@ import type { WorkspaceCanvasEntry, WorkspaceInfo } from '@shared/api'
 import { desktopHost, workspaceApi } from './host'
 import { showDialog } from './dialog'
 import { nextCanvasName, type CanvasMutationResult, type SaveStatus } from './workspaceTypes'
+import { nestedCanvasesEnabled, setNestedCanvasesEnabled } from './workspacePrefs'
 
 const BLANK_SVG = serializeCanvas(emptyDoc())
 const AUTO_SAVE_DELAY = 700
@@ -54,6 +55,10 @@ const currentPath = ref<string | null>(null)
 const currentName = ref('未命名.svg')
 const autoSaveOn = ref(false)
 const activeRelPath = ref<string | null>(null)
+/** 仓库页左侧目录栏是否收起(收起后画布占满宽度) */
+const sidebarCollapsed = ref(false)
+/** 仓库列表是否递归显示子目录里的画布(设置 → 布局) */
+const nestedCanvases = ref(nestedCanvasesEnabled())
 /** 只有用户主动「新建画布」时才展示模板卡片;打开已有画布/临时画布不弹 */
 const showWelcome = ref(false)
 const dragging = ref(false)
@@ -340,7 +345,7 @@ async function refreshWorkspace(silent = false): Promise<void> {
   const info = workspace.value
   if (!info) return
   try {
-    workspace.value = await workspaceApi.read(info.dir)
+    workspace.value = await workspaceApi.read(info.dir, { recursive: nestedCanvases.value })
     updateTitle()
   } catch (err) {
     if (silent) console.error('[iDraw] 刷新仓库失败:', err)
@@ -354,7 +359,7 @@ async function openWorkspace(dir: string): Promise<void> {
   busy = true
   let info: WorkspaceInfo
   try {
-    info = await workspaceApi.read(dir)
+    info = await workspaceApi.read(dir, { recursive: nestedCanvases.value })
   } catch (err) {
     notifyError('打开仓库', err)
     busy = false
@@ -591,6 +596,13 @@ function handleFileAction(action: 'new' | 'open' | 'save' | 'export-png' | 'back
 }
 
 /** 设置面板里的编辑器开关:只作用于当前画布 */
+function toggleNestedCanvases(): void {
+  nestedCanvases.value = !nestedCanvases.value
+  setNestedCanvasesEnabled(nestedCanvases.value)
+  // 当前正打开着仓库时立即按新偏好重扫一遍
+  if (workspace.value) void refreshWorkspace()
+}
+
 function toggleGridFromMenu(): void {
   const rt = runtime.value
   if (rt) rt.setGridVisible(!rt.ui.gridVisible)
@@ -762,7 +774,7 @@ onBeforeUnmount(() => {
 <template>
   <div
     class="idraw-app"
-    :class="{ 'has-workspace': !!workspace }"
+    :class="{ 'has-workspace': !!workspace, 'sidebar-collapsed': !!workspace && sidebarCollapsed }"
     @dragenter.prevent="onDragEnter"
     @dragover.prevent
     @dragleave.prevent="onDragLeave"
@@ -783,12 +795,13 @@ onBeforeUnmount(() => {
           :active-rel-path="activeRelPath"
           :active-dirty="dirty"
           :active-saving="saveStatus === 'saving'"
+          :collapsed="sidebarCollapsed"
           :create-canvas="createCanvasInWorkspace"
           :rename-canvas="renameCanvasInWorkspace"
           :delete-canvas="deleteCanvasInWorkspace"
           @open="openWorkspaceCanvas"
           @refresh="refreshWorkspace()"
-          @back="backToPicker"
+          @toggle-collapse="sidebarCollapsed = !sidebarCollapsed"
         />
 
         <div class="idraw-stage">
@@ -831,14 +844,18 @@ onBeforeUnmount(() => {
       :can-save="!!runtime && !runtime.readOnly && runtime.ui.dirty"
       :can-undo="runtime?.ui.canUndo ?? false"
       :can-redo="runtime?.ui.canRedo ?? false"
+      :can-back="view !== 'picker'"
       :grid-visible="runtime?.ui.gridVisible ?? null"
       :snap="runtime?.ui.snap ?? null"
+      :show-nested-canvases="nestedCanvases"
       @save="handleFileAction('save')"
       @export-png="handleFileAction('export-png')"
       @undo="runtime?.undo()"
       @redo="runtime?.redo()"
       @toggle-grid="toggleGridFromMenu"
       @toggle-snap="toggleSnapFromMenu"
+      @toggle-nested-canvases="toggleNestedCanvases"
+      @back-to-overview="backToPicker"
     />
     <WindowControls v-if="showWindowControls" />
     <ThemedDialogHost />

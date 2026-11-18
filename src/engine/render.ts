@@ -8,7 +8,15 @@
  * 只创建真正存在的内容,不生成位图:几百到上千个节点仍是普通 SVG DOM,
  * 内存随节点数线性增长,而不是随"画布像素数"。
  */
-import type { CanvasDoc, CanvasEdge, CanvasNode } from './model'
+import {
+  DARK_NODE_DEFAULTS,
+  NODE_DEFAULTS,
+  newNodeStyle,
+  type CanvasDoc,
+  type CanvasEdge,
+  type CanvasNode,
+  type ShapeKind
+} from './model'
 import { edgeGeometry, type Rect } from './geometry'
 import { layoutNodeText, shapeParts, textAttrs } from './shapes'
 
@@ -36,6 +44,8 @@ export interface RenderState {
   marquee: Rect | null
   /** 拖拽新建形状时的预览框(世界坐标) */
   createRect: Rect | null
+  /** 正在拖画出来的形状;null 时按圆角矩形预览 */
+  createShape: ShapeKind | null
   guides: Guide[]
   /** 拖拽中的连线预览(世界坐标 path d) */
   previewPath: string | null
@@ -289,6 +299,17 @@ export class CanvasRenderer {
     if (group.getAttribute('transform') !== transform) group.setAttribute('transform', transform)
     group.setAttribute('data-idraw-shape', node.shape)
     group.classList.toggle('canvas-node-selected', selected)
+    // 无填充节点的文字跟随主题:文档里存的是固定颜色,换主题后可能和画布撞色。
+    // 只处理两种默认色,用户自定义的颜色不动。
+    const plainColor = node.style.color.toLowerCase()
+    group.classList.toggle(
+      'canvas-node-autotext',
+      node.style.fill === 'none' && plainColor === NODE_DEFAULTS.color.toLowerCase()
+    )
+    group.classList.toggle(
+      'canvas-node-autotext-inverse',
+      node.style.fill === 'none' && plainColor === DARK_NODE_DEFAULTS.color.toLowerCase()
+    )
 
     // 形状 + 文字的 DOM 只在这两样真的变了时重建;拖拽走 updateNodes 不会到这里
     const signature = [
@@ -328,6 +349,23 @@ export class CanvasRenderer {
         text.append(tspan)
       })
       group.append(text)
+    } else if (!hideText && node.shape === 'text') {
+      // 空文本框没有任何形状/文字,不画占位就完全看不见(也无法用框选发现)。
+      // 这只是编辑器的提示,保存/导出走 serialize,不会写进文件。
+      const box = el('rect')
+      box.classList.add('canvas-text-placeholder')
+      setAttrs(box, { x: 0, y: 0, width: node.w, height: node.h, rx: 6 })
+      group.append(box)
+      const hint = el('text')
+      hint.classList.add('canvas-text-placeholder-hint')
+      setAttrs(hint, {
+        x: node.w / 2,
+        y: node.h / 2,
+        'text-anchor': 'middle',
+        'dominant-baseline': 'central'
+      })
+      hint.textContent = '空文本框'
+      group.append(hint)
     }
   }
 
@@ -509,17 +547,37 @@ export class CanvasRenderer {
     }
 
     if (state.createRect) {
-      const a = this.toScreen(state.createRect.x, state.createRect.y)
-      const box = el('rect')
-      box.classList.add('canvas-create-preview')
-      setAttrs(box, {
-        x: a.x,
-        y: a.y,
-        width: state.createRect.w * scale,
-        height: state.createRect.h * scale,
-        rx: 6
-      })
-      this.overlay.append(box)
+      // 按选中的形状画预览:把形状几何放进一个按视口缩放的组里,
+      // 笔画由 CSS 统一成 1px 虚线(见 .canvas-create-preview-shape)。
+      const rect = state.createRect
+      const a = this.toScreen(rect.x, rect.y)
+      const group = el('g')
+      group.classList.add('canvas-create-preview-shape')
+      group.setAttribute('transform', `translate(${a.x} ${a.y}) scale(${scale})`)
+      const preview: CanvasNode = {
+        id: '__create__',
+        shape: state.createShape ?? 'roundRect',
+        x: rect.x,
+        y: rect.y,
+        w: rect.w,
+        h: rect.h,
+        text: '',
+        style: newNodeStyle()
+      }
+      const parts = shapeParts(preview)
+      if (parts.length === 0) {
+        // 文本等没有几何体的形状:退回一个虚线框
+        const box = el('rect')
+        setAttrs(box, { x: 0, y: 0, width: rect.w, height: rect.h, rx: 6 })
+        group.append(box)
+      } else {
+        for (const part of parts) {
+          const child = el(part.tag as 'rect')
+          setAttrs(child, part.attrs)
+          group.append(child)
+        }
+      }
+      this.overlay.append(group)
     }
 
     for (const guide of state.guides) {

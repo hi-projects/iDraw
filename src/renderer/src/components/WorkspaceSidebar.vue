@@ -14,6 +14,7 @@ import {
 } from 'vue'
 import {
   ChevronLeft,
+  ChevronRight,
   Cloud,
   FileImage,
   FilePlus2,
@@ -31,6 +32,8 @@ const props = defineProps<{
   activeRelPath: string | null
   activeDirty: boolean
   activeSaving: boolean
+  /** 目录侧栏是否收起 */
+  collapsed: boolean
   createCanvas: (name: string) => Promise<CanvasMutationResult>
   renameCanvas: (entry: WorkspaceCanvasEntry, name: string) => Promise<CanvasMutationResult>
   deleteCanvas: (entry: WorkspaceCanvasEntry) => Promise<CanvasMutationResult>
@@ -38,8 +41,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'open', entry: WorkspaceCanvasEntry): void
-  (e: 'back'): void
   (e: 'refresh'): void
+  (e: 'toggle-collapse'): void
 }>()
 
 const INVALID_NAME = /[\\/:*?"<>|]/
@@ -232,30 +235,8 @@ async function removeEntry(entry: WorkspaceCanvasEntry): Promise<void> {
 </script>
 
 <template>
-  <aside class="workspace-sidebar">
-    <header class="workspace-sidebar-head">
-      <button
-        class="workspace-icon-btn"
-        title="返回仓库选择"
-        data-action="workspace-back"
-        @click="emit('back')"
-      >
-        <ChevronLeft :size="17" />
-      </button>
-      <div class="workspace-sidebar-title">
-        <span class="workspace-sidebar-name">{{ info.name }}</span>
-        <span class="workspace-sidebar-path" :title="info.dir"><bdi>{{ info.dir }}</bdi></span>
-      </div>
-      <button
-        class="workspace-icon-btn"
-        title="刷新画布列表"
-        data-action="workspace-refresh"
-        @click="emit('refresh')"
-      >
-        <RefreshCw :size="14" />
-      </button>
-    </header>
-
+  <aside class="workspace-sidebar" :class="{ collapsed }">
+    <!-- 顶部不再单独放仓库名/路径,首行就是「新建文件」+ 刷新 -->
     <div class="workspace-sidebar-actions">
       <button
         class="workspace-new-canvas"
@@ -265,6 +246,14 @@ async function removeEntry(entry: WorkspaceCanvasEntry): Promise<void> {
       >
         <FilePlus2 :size="15" />
         新建文件
+      </button>
+      <button
+        class="workspace-icon-btn"
+        title="刷新画布列表"
+        data-action="workspace-refresh"
+        @click="emit('refresh')"
+      >
+        <RefreshCw :size="14" />
       </button>
     </div>
 
@@ -362,5 +351,18 @@ async function removeEntry(entry: WorkspaceCanvasEntry): Promise<void> {
       <span>{{ info.canvases.length }} 张画布</span>
       <span class="workspace-autosave-hint"><Cloud :size="12" /> 自动保存</span>
     </footer>
+
+    <!-- 贴在滚动条右侧边缘的收起/展开把手 -->
+    <button
+      class="workspace-sidebar-collapse"
+      type="button"
+      data-action="workspace-collapse"
+      :title="collapsed ? '展开目录' : '收起目录'"
+      :aria-expanded="!collapsed"
+      @click="emit('toggle-collapse')"
+    >
+      <ChevronRight v-if="collapsed" :size="14" />
+      <ChevronLeft v-else :size="14" />
+    </button>
   </aside>
 </template>

@@ -106,6 +106,7 @@ export interface CanvasRuntimeOptions {
 interface RenderSnapshot {
   guides: Guide[]
   createRect: RenderState['createRect']
+  createShape: RenderState['createShape']
   marquee: RenderState['marquee']
   previewPath: string | null
   previewAnchor: CanvasNode | null
@@ -141,6 +142,7 @@ export class CanvasRuntime {
   private snapshot: RenderSnapshot = {
     guides: [],
     createRect: null,
+    createShape: null,
     marquee: null,
     previewPath: null,
     previewAnchor: null,
@@ -166,7 +168,7 @@ export class CanvasRuntime {
       this.readOnlyInfo = {
         reason:
           parsed.kind === 'foreign'
-            ? '这是一个外部 SVG 文件，iDraw 只作只读预览。用「新建画布」创建的文件才能编辑。'
+            ? '这是一个外部 SVG 文件，iDraw 只作只读预览。'
             : `无法用 iDraw 打开：${parsed.message}`
       }
     }
@@ -240,8 +242,9 @@ export class CanvasRuntime {
       setGuides: g => {
         self.snapshot.guides = g
       },
-      setCreateRect: r => {
+      setCreateRect: (r, shape) => {
         self.snapshot.createRect = r
+        self.snapshot.createShape = shape ?? null
       },
       setMarquee: r => {
         self.snapshot.marquee = r
@@ -321,6 +324,7 @@ export class CanvasRuntime {
     this.snapshot.previewAnchor = null
     this.snapshot.guides = []
     this.snapshot.createRect = null
+    this.snapshot.createShape = null
     this.snapshot.marquee = null
   }
 
@@ -623,6 +627,75 @@ export class CanvasRuntime {
     }
     this.doc.nodes.push(node)
     return node
+  }
+
+  /**
+   * 插入面板拖动中的实时预览:按默认尺寸画在鼠标位置,返回是否显示。
+   * 和落点使用同一套居中规则,所见即所得。
+   */
+  showInsertPreview(shape: ShapeKind, clientX: number, clientY: number): boolean {
+    if (this.readOnly || !this.renderer || !this.hostEl) return false
+    const bounds = this.hostEl.getBoundingClientRect()
+    const inside =
+      clientX >= bounds.left &&
+      clientX <= bounds.right &&
+      clientY >= bounds.top &&
+      clientY <= bounds.bottom
+    if (!inside) {
+      this.clearInsertPreview()
+      return false
+    }
+    const size = DEFAULT_SIZE[shape]
+    if (!size) return false
+    const p = this.renderer.toWorld(clientX, clientY)
+    this.snapshot.createShape = shape
+    this.snapshot.createRect = {
+      x: Math.round(p.x - size.w / 2),
+      y: Math.round(p.y - size.h / 2),
+      w: size.w,
+      h: size.h
+    }
+    this.renderOverlay()
+    return true
+  }
+
+  clearInsertPreview(): void {
+    if (!this.snapshot.createRect && !this.snapshot.createShape) return
+    this.snapshot.createRect = null
+    this.snapshot.createShape = null
+    this.renderOverlay()
+  }
+
+  /**
+   * 从插入面板直接拖进画布:在屏幕坐标处放一个默认尺寸的形状。
+   * 落点不在画布区域内(例如松手在侧栏上)就什么也不做。
+   */
+  insertShapeAt(shape: ShapeKind, clientX: number, clientY: number): boolean {
+    if (this.readOnly || !this.renderer || !this.hostEl) return false
+    const bounds = this.hostEl.getBoundingClientRect()
+    if (
+      clientX < bounds.left ||
+      clientX > bounds.right ||
+      clientY < bounds.top ||
+      clientY > bounds.bottom
+    ) {
+      return false
+    }
+    this.flush()
+    const size = DEFAULT_SIZE[shape]
+    if (!size) return false
+    const p = this.renderer.toWorld(clientX, clientY)
+    const node = this.addNode(shape, {
+      x: Math.round(p.x - size.w / 2),
+      y: Math.round(p.y - size.h / 2),
+      w: size.w,
+      h: size.h
+    })
+    this.commit([{ op: 'delNode', id: node.id }], [
+      { op: 'addNode', index: this.doc.nodes.length - 1, node: cloneNode(node) }
+    ], true)
+    this.setSelection([node.id])
+    return true
   }
 
   /** 记录一次已应用在场景上的修改;`applied=false` 时先把 redo 应用到场景 */
@@ -935,6 +1008,7 @@ export class CanvasRuntime {
       editingEdge: this.editing?.kind === 'edge' ? this.editing.id : null,
       marquee: this.snapshot.marquee,
       createRect: this.snapshot.createRect,
+      createShape: this.snapshot.createShape,
       guides: this.snapshot.guides,
       previewPath: this.snapshot.previewPath,
       anchorNode: this.snapshot.previewAnchor,
@@ -956,8 +1030,9 @@ export class CanvasRuntime {
     this.snapshot.marquee = rect
   }
 
-  setCreateRect(rect: RenderState['createRect']): void {
+  setCreateRect(rect: RenderState['createRect'], shape: ShapeKind | null = null): void {
     this.snapshot.createRect = rect
+    this.snapshot.createShape = shape
   }
 
   setHoverEdge(id: string | null): void {

@@ -37,6 +37,30 @@ export interface WorkspaceInfo {
   canvases: WorkspaceCanvasEntry[]
 }
 
+/** 应用内文件夹浏览器里的一级子目录。 */
+export interface WorkspaceDirEntry {
+  name: string
+  path: string
+  /** 点前缀的隐藏目录(默认也显示) */
+  hidden: boolean
+}
+
+/** 文件夹浏览器里当前目录下的 SVG 文件,点开可直接编辑。 */
+export interface WorkspaceDirFile {
+  name: string
+  path: string
+  hidden: boolean
+}
+
+export interface WorkspaceDirListing {
+  /** 当前目录绝对路径 */
+  dir: string
+  /** 上一级目录;已经在根目录时为 null */
+  parent: string | null
+  dirs: WorkspaceDirEntry[]
+  files: WorkspaceDirFile[]
+}
+
 export type RecentKind = 'workspace' | 'file'
 
 /** 最近打开列表的一项:整个仓库,或单个 SVG 画布。 */
@@ -54,8 +78,10 @@ export interface RecentEntry {
 export interface WorkspaceApi {
   /** 选择目录作为仓库;取消时返回 null */
   selectDirectory(): Promise<string | null>
-  /** 读取仓库信息与画布列表(递归,跳过隐藏目录与构建产物) */
-  read(dir: string): Promise<WorkspaceInfo>
+  /** 列出目录下的子目录(含隐藏目录),供应用内文件夹浏览器使用 */
+  listDirectories(dir: string | null): Promise<WorkspaceDirListing>
+  /** 读取仓库信息与画布列表;recursive 为 true 时才扫描子目录(默认只读当前目录) */
+  read(dir: string, options?: { recursive?: boolean }): Promise<WorkspaceInfo>
   /** 在仓库根目录新建画布;重名时报错 */
   createCanvas(dir: string, name: string, content: string): Promise<WorkspaceCanvasEntry>
   /** 重命名画布(保持所在子目录不变) */

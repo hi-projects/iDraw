@@ -2,13 +2,19 @@
 
 /* 仓库模式下侧栏占据左侧,齿轮始终贴在画布区域的左下角 */
 .idraw-app.has-workspace {
-  --idraw-corner-left: calc(248px + 18px);
+  /* 侧栏 248px 宽 + 1px 右边框,齿轮再留 18px 间隙 */
+  --idraw-corner-left: calc(248px + 1px + 18px);
 }
 
 @media (max-width: 760px) {
   .idraw-app.has-workspace {
-    --idraw-corner-left: calc(220px + 18px);
+    --idraw-corner-left: calc(220px + 1px + 18px);
   }
+}
+
+/* 目录侧栏收起后齿轮跟随回到窗口左下角 */
+.idraw-app.has-workspace.sidebar-collapsed {
+  --idraw-corner-left: 18px;
 }
 
 .idraw-corner-btn {

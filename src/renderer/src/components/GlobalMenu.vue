@@ -11,6 +11,7 @@ import {
   Cog,
   Download,
   Info,
+  LayoutGrid,
   Palette,
   Redo2,
   Save,
@@ -22,17 +23,21 @@ import {
 import appIcon from '../../../../build/icon.png'
 import { getThemePreference, setThemePreference, type ThemePreference } from '../theme'
 
-type SettingsSection = 'appearance' | 'editor' | 'about'
+type SettingsSection = 'appearance' | 'editor' | 'layout' | 'about'
 
-const props = defineProps<{
+defineProps<{
   hasDocument: boolean
   readOnly: boolean
   canSave: boolean
   canUndo: boolean
   canRedo: boolean
+  /** 是否显示「返回画布总览」(已经停在总览页时为 false) */
+  canBack: boolean
   /** null = 当前没有打开画布 */
   gridVisible: boolean | null
   snap: boolean | null
+  /** 仓库列表是否递归显示子目录中的画布 */
+  showNestedCanvases: boolean
 }>()
 
 const emit = defineEmits<{
@@ -42,15 +47,17 @@ const emit = defineEmits<{
   (e: 'redo'): void
   (e: 'toggle-grid'): void
   (e: 'toggle-snap'): void
+  (e: 'toggle-nested-canvases'): void
+  (e: 'back-to-overview'): void
 }>()
 
 const menuOpen = ref(false)
 const settingsOpen = ref(false)
 const activeSection = ref<SettingsSection>('appearance')
 const theme = ref<ThemePreference>(getThemePreference())
-const showDocumentActions = computed(() => props.hasDocument && !props.readOnly)
 const sectionTitle = computed(() => {
   if (activeSection.value === 'editor') return '编辑器'
+  if (activeSection.value === 'layout') return '布局'
   if (activeSection.value === 'about') return '关于'
   return '外观'
 })
@@ -80,6 +87,11 @@ function openSettings(): void {
   settingsOpen.value = true
 }
 
+function chooseBackToOverview(): void {
+  menuOpen.value = false
+  emit('back-to-overview')
+}
+
 function chooseTheme(value: ThemePreference): void {
   theme.value = value
   setThemePreference(value)
@@ -104,52 +116,63 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   <div class="idraw-global-menu">
     <div v-if="menuOpen" class="idraw-corner-mask" @click="menuOpen = false" />
     <div v-if="menuOpen" class="idraw-corner-menu" role="menu">
-      <template v-if="showDocumentActions">
-        <button
-          class="idraw-corner-menu-item"
-          type="button"
-          data-action="menu-save"
-          :disabled="!canSave"
-          @click="chooseSave"
-        >
-          <Save :size="14" />
-          保存
-        </button>
-        <button
-          class="idraw-corner-menu-item"
-          type="button"
-          data-action="menu-export-png"
-          @click="chooseExportPng"
-        >
-          <Download :size="14" />
-          导出 PNG
-        </button>
+      <!-- 文档操作始终显示:没有打开画布 / 只读预览时置灰,而不是整组消失 -->
+      <button
+        class="idraw-corner-menu-item"
+        type="button"
+        data-action="menu-save"
+        :disabled="!canSave"
+        @click="chooseSave"
+      >
+        <Save :size="14" />
+        保存
+      </button>
+      <button
+        class="idraw-corner-menu-item"
+        type="button"
+        data-action="menu-export-png"
+        :disabled="!hasDocument || readOnly"
+        @click="chooseExportPng"
+      >
+        <Download :size="14" />
+        导出 PNG
+      </button>
 
-        <div class="idraw-corner-sep" role="separator"></div>
+      <div class="idraw-corner-sep" role="separator"></div>
 
-        <button
-          class="idraw-corner-menu-item"
-          type="button"
-          data-action="menu-undo"
-          :disabled="!canUndo"
-          @click="chooseUndo"
-        >
-          <Undo2 :size="14" />
-          撤销
-        </button>
-        <button
-          class="idraw-corner-menu-item"
-          type="button"
-          data-action="menu-redo"
-          :disabled="!canRedo"
-          @click="chooseRedo"
-        >
-          <Redo2 :size="14" />
-          重做
-        </button>
+      <button
+        class="idraw-corner-menu-item"
+        type="button"
+        data-action="menu-undo"
+        :disabled="!canUndo"
+        @click="chooseUndo"
+      >
+        <Undo2 :size="14" />
+        撤销
+      </button>
+      <button
+        class="idraw-corner-menu-item"
+        type="button"
+        data-action="menu-redo"
+        :disabled="!canRedo"
+        @click="chooseRedo"
+      >
+        <Redo2 :size="14" />
+        重做
+      </button>
 
-        <div class="idraw-corner-sep" role="separator"></div>
-      </template>
+      <div class="idraw-corner-sep" role="separator"></div>
+
+      <button
+        v-if="canBack"
+        class="idraw-corner-menu-item"
+        type="button"
+        data-action="menu-back-overview"
+        @click="chooseBackToOverview"
+      >
+        <LayoutGrid :size="14" />
+        返回画布总览
+      </button>
 
       <button
         class="idraw-corner-menu-item"
@@ -198,6 +221,16 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
             >
               <SlidersHorizontal :size="15" />
               编辑器
+            </button>
+            <button
+              class="idraw-settings-nav-item"
+              :class="{ active: activeSection === 'layout' }"
+              type="button"
+              data-section="layout"
+              @click="activeSection = 'layout'"
+            >
+              <LayoutGrid :size="15" />
+              布局
             </button>
           </div>
 
@@ -341,6 +374,30 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                 <p v-if="gridVisible === null" class="idraw-settings-hint">
                   打开一张画布后可以调整这些选项。
                 </p>
+              </div>
+            </template>
+
+            <template v-else-if="activeSection === 'layout'">
+              <div class="idraw-settings-section">
+                <div class="idraw-settings-row">
+                  <div>
+                    <div class="idraw-settings-row-label">显示子目录中的 SVG</div>
+                    <div class="idraw-settings-row-hint">
+                      开启后,仓库左侧列表会递归显示所有子目录里的画布;默认只显示当前目录,避免打开大目录时混入回收站、扩展缓存里的文件。
+                    </div>
+                  </div>
+                  <button
+                    class="idraw-settings-switch"
+                    :class="{ on: showNestedCanvases }"
+                    type="button"
+                    role="switch"
+                    data-field="show-nested-canvases"
+                    :aria-checked="showNestedCanvases"
+                    @click="emit('toggle-nested-canvases')"
+                  >
+                    <span />
+                  </button>
+                </div>
               </div>
             </template>
 

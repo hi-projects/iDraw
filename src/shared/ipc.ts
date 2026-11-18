@@ -17,6 +17,7 @@ export const IPC = {
   MenuCommand: 'app:menu-command',
   OpenFile: 'app:open-file',
   WorkspacePickDirectory: 'workspace:pick-directory',
+  WorkspaceListDirs: 'workspace:list-dirs',
   WorkspaceRead: 'workspace:read',
   WorkspaceCreateCanvas: 'workspace:create-canvas',
   WorkspaceRenameCanvas: 'workspace:rename-canvas',

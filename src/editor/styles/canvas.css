@@ -198,6 +198,11 @@
   background: color-mix(in oklch, var(--bg-app) 35%, transparent);
 }
 
+/* 拖动形状到画布时撤掉遮罩的变暗,画布上的实时预览才看得清 */
+.shape-panel-layer.is-dragging .shape-panel-mask {
+  background: transparent;
+}
+
 .shape-panel {
   position: relative;
   z-index: 1;
@@ -432,12 +437,17 @@
   pointer-events: none;
 }
 
-.canvas-create-preview {
-  fill: rgb(59 130 246 / 0.08);
+/* 拖画形状时的预览:按选中的形状渲染,统一成 1px 虚线轮廓 */
+.canvas-create-preview-shape {
+  pointer-events: none;
+}
+
+.canvas-create-preview-shape > * {
+  fill: color-mix(in srgb, var(--accent) 8%, transparent);
   stroke: var(--accent);
   stroke-width: 1;
   stroke-dasharray: 4 3;
-  pointer-events: none;
+  vector-effect: non-scaling-stroke;
 }
 
 .canvas-guide {
@@ -903,4 +913,33 @@
 .editor-pane-hidden {
   visibility: hidden;
   pointer-events: none;
+}
+
+/* ---------- 文本节点 ---------- */
+
+/* 空文本框:没有任何形状和文字,不画占位就完全看不见、也框选不到。
+   这只是编辑器提示,保存/导出走 serialize,不会写进文件。 */
+.canvas-text-placeholder {
+  fill: color-mix(in srgb, var(--accent) 7%, transparent);
+  stroke: color-mix(in srgb, var(--accent) 50%, transparent);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+  pointer-events: none;
+}
+
+.canvas-text-placeholder-hint {
+  fill: color-mix(in srgb, var(--text-primary) 45%, transparent);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+/* 深色画布上,无填充节点的默认文字改成浅色 —— 文档里存的是白底用的深色,
+   直接显示会看不见。用户自定义的文字颜色不受影响。 */
+:root[data-theme='dark'] .canvas-node.canvas-node-autotext text:not(.canvas-text-placeholder-hint) {
+  fill: var(--text-primary);
+}
+
+/* 反向情况:深色主题下创建的默认浅色文字,切到浅色主题时改用深色 */
+:root[data-theme='light'] .canvas-node.canvas-node-autotext-inverse text:not(.canvas-text-placeholder-hint) {
+  fill: var(--text-primary);
 }

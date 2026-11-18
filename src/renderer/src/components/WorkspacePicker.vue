@@ -21,6 +21,8 @@ import { dirNameOf, fileNameOf, joinPath } from '@shared/path'
 import { api } from '../../../host/windowApi'
 import { notifyError } from '../../../editor/notice'
 import { workspaceApi } from '../host'
+import { nestedCanvasesEnabled } from '../workspacePrefs'
+import DirectoryBrowser from './DirectoryBrowser.vue'
 import appIcon from '../../../../build/icon.png'
 
 const emit = defineEmits<{
@@ -52,10 +54,11 @@ const MAX_PREVIEW_TEXT = 3_000_000
 
 const cards = ref<RecentCard[]>([])
 const loading = ref(true)
-const pickingWorkspace = ref(false)
 const pickingFile = ref(false)
 /** 「+」卡片下的三个入口 */
 const menuOpen = ref(false)
+/** 应用内文件夹浏览器(原生对话框在 Linux 上看不到隐藏目录) */
+const browsing = ref(false)
 
 function basename(path: string): string {
   return fileNameOf(path) || path
@@ -94,7 +97,7 @@ function makeCard(entry: RecentEntry): RecentCard {
 async function loadPreview(card: RecentCard): Promise<void> {
   if (card.kind === 'workspace') {
     try {
-      const info = await workspaceApi.read(card.path)
+      const info = await workspaceApi.read(card.path, { recursive: nestedCanvasesEnabled() })
       const picks = info.canvases.slice(0, PREVIEW_LIMIT)
       card.previews = await Promise.all(
         picks.map(item => readPreview(joinPath(card.path, item.relPath), item.name, item.relPath))
@@ -131,17 +134,14 @@ onMounted(async () => {
   await Promise.all([worker(), worker(), worker()])
 })
 
-async function openWorkspaceFromDialog(): Promise<void> {
-  if (pickingWorkspace.value) return
-  pickingWorkspace.value = true
-  try {
-    const dir = await workspaceApi.selectDirectory()
-    if (dir) emit('open-workspace', dir)
-  } catch (err) {
-    notifyError('打开仓库', err)
-  } finally {
-    pickingWorkspace.value = false
-  }
+function onDirectorySelected(dir: string): void {
+  browsing.value = false
+  emit('open-workspace', dir)
+}
+
+function onDirectoryFileSelected(path: string): void {
+  browsing.value = false
+  emit('open-file', path)
 }
 
 function chooseTemporary(): void {
@@ -156,7 +156,7 @@ function chooseFile(): void {
 
 function chooseWorkspace(): void {
   menuOpen.value = false
-  void openWorkspaceFromDialog()
+  browsing.value = true
 }
 
 async function openSvgFile(): Promise<void> {
@@ -261,15 +261,9 @@ async function forget(card: RecentCard): Promise<void> {
                     class="workspace-recent-empty-menu-item"
                     type="button"
                     data-action="open-workspace"
-                    :disabled="pickingWorkspace"
                     @click="chooseWorkspace"
                   >
-                    <Loader2
-                      v-if="pickingWorkspace"
-                      :size="26"
-                      class="workspace-spin workspace-recent-empty-menu-icon"
-                    />
-                    <FolderOpen v-else :size="26" class="workspace-recent-empty-menu-icon" />
+                    <FolderOpen :size="26" class="workspace-recent-empty-menu-icon" />
                     <span>打开文件夹</span>
                   </button>
                 </div>
@@ -298,7 +292,7 @@ async function forget(card: RecentCard): Promise<void> {
               <div v-else-if="card.previews.length === 0" class="workspace-recent-cover-state">
                 <FolderOpen v-if="card.kind === 'workspace' && !card.failed" :size="22" />
                 <FileImage v-else :size="22" />
-                <span>{{ card.kind === 'workspace' && !card.failed ? '空仓库' : '无法预览' }}</span>
+                <span>{{ card.kind === 'workspace' && !card.failed ? '无画布' : '无法预览' }}</span>
               </div>
               <template v-else>
                 <div
@@ -339,5 +333,11 @@ async function forget(card: RecentCard): Promise<void> {
       </div>
     </main>
 
+    <DirectoryBrowser
+      v-if="browsing"
+      @close="browsing = false"
+      @select="onDirectorySelected"
+      @open-file="onDirectoryFileSelected"
+    />
   </div>
 </template>

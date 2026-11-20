@@ -55,6 +55,58 @@
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
+/* ---------- 状态栏内的全局菜单入口 ---------- */
+
+.idraw-global-menu.is-inline {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.idraw-global-menu.is-inline .idraw-corner-btn,
+.idraw-status-icon-btn {
+  position: static;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  box-shadow: none;
+  backdrop-filter: none;
+  cursor: pointer;
+  transition:
+    background-color 0.14s ease,
+    color 0.14s ease;
+  -webkit-app-region: no-drag;
+}
+
+.idraw-global-menu.is-inline .idraw-corner-btn:hover,
+.idraw-global-menu.is-inline .idraw-corner-btn.active,
+.idraw-status-icon-btn:hover {
+  background: var(--bg-toolbar-btn-hover);
+  color: var(--text-primary);
+  transform: none;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.idraw-global-menu.is-inline .idraw-corner-btn.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* 从状态栏向上弹出 */
+.idraw-global-menu.is-inline .idraw-corner-menu {
+  left: 0;
+  bottom: calc(100% + 8px);
+}
+
 .idraw-corner-mask {
   position: fixed;
   inset: 0;

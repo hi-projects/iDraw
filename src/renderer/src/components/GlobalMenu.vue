@@ -3,9 +3,10 @@
  * 左下角全局菜单 + 设置面板。
  *
  * 菜单里保留画布操作(保存/导出/撤销/重做),并作为设置入口。
- * 设置面板采用左侧分区 + 右侧内容的布局,目前包含外观、编辑器、关于。
+ * 设置面板采用左侧分区 + 右侧内容的布局,包含外观、编辑器、关于;
+ * 其中「布局」分区只在打开了目录(仓库)时出现。
  */
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   Check,
   Cog,
@@ -25,8 +26,10 @@ import { getThemePreference, setThemePreference, type ThemePreference } from '..
 
 type SettingsSection = 'appearance' | 'editor' | 'layout' | 'about'
 
-defineProps<{
+const props = defineProps<{
   hasDocument: boolean
+  /** 当前是否打开了目录(仓库);「布局」分区只在这种情况下出现 */
+  hasWorkspace: boolean
   readOnly: boolean
   canSave: boolean
   canUndo: boolean
@@ -38,6 +41,8 @@ defineProps<{
   snap: boolean | null
   /** 仓库列表是否递归显示子目录中的画布 */
   showNestedCanvases: boolean
+  /** 嵌在底部状态栏里(而非左下角悬浮) */
+  inline?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -61,6 +66,14 @@ const sectionTitle = computed(() => {
   if (activeSection.value === 'about') return '关于'
   return '外观'
 })
+
+// 目录关闭后「布局」分区不再展示,避免停留在已隐藏的分区上
+watch(
+  () => props.hasWorkspace,
+  hasWorkspace => {
+    if (!hasWorkspace && activeSection.value === 'layout') activeSection.value = 'appearance'
+  }
+)
 
 function chooseSave(): void {
   menuOpen.value = false
@@ -113,7 +126,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 </script>
 
 <template>
-  <div class="idraw-global-menu">
+  <div class="idraw-global-menu" :class="{ 'is-inline': inline }">
     <div v-if="menuOpen" class="idraw-corner-mask" @click="menuOpen = false" />
     <div v-if="menuOpen" class="idraw-corner-menu" role="menu">
       <!-- 文档操作始终显示:没有打开画布 / 只读预览时置灰,而不是整组消失 -->
@@ -164,17 +177,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
       <div class="idraw-corner-sep" role="separator"></div>
 
       <button
-        v-if="canBack"
-        class="idraw-corner-menu-item"
-        type="button"
-        data-action="menu-back-overview"
-        @click="chooseBackToOverview"
-      >
-        <LayoutGrid :size="14" />
-        返回画布总览
-      </button>
-
-      <button
         class="idraw-corner-menu-item"
         type="button"
         data-action="open-settings"
@@ -196,7 +198,20 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
       :aria-expanded="menuOpen"
       @click="menuOpen = !menuOpen"
     >
-      <Cog :size="19" />
+      <Cog :size="inline ? 14 : 19" />
+    </button>
+
+    <!-- 状态栏模式下:返回画布总览是齿轮右边的独立图标 -->
+    <button
+      v-if="inline && canBack"
+      class="idraw-status-icon-btn"
+      type="button"
+      data-action="back-overview"
+      title="返回画布总览"
+      aria-label="返回画布总览"
+      @click="chooseBackToOverview"
+    >
+      <LayoutGrid :size="14" />
     </button>
 
     <div v-if="settingsOpen" class="idraw-settings-overlay" @click.self="settingsOpen = false">
@@ -223,6 +238,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
               编辑器
             </button>
             <button
+              v-if="hasWorkspace"
               class="idraw-settings-nav-item"
               :class="{ active: activeSection === 'layout' }"
               type="button"

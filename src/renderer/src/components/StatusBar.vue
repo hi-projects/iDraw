@@ -38,6 +38,10 @@ const statusText = computed(() => {
 <template>
   <footer class="idraw-statusbar">
     <div class="idraw-status-left">
+      <div v-if="$slots.actions" class="idraw-status-actions">
+        <slot name="actions" />
+      </div>
+      <span v-if="$slots.actions" class="idraw-status-divider"></span>
       <template v-if="workspaceName">
         <FolderOpen :size="12" />
         <span class="idraw-status-name">{{ workspaceName }}</span>

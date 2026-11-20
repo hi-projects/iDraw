@@ -106,15 +106,20 @@ iDraw 自己的几何以 `data-idraw-*` 为准。
 | `data-idraw-from-x` / `data-idraw-from-y` | 仅自由端点：世界坐标 |
 | `data-idraw-routing` | `straight` / `orthogonal` / `curve` |
 | `data-idraw-arrow` | `none` / `start` / `end` / `both` |
+| `data-idraw-arrow-style` | `solid`(实心,缺省)/ `hollow`(空心) |
+| `data-idraw-arrow-size` | 箭头大小倍数,缺省 `9`,范围 2–20 |
 | `d` | 实际路径。其他软件直接按它绘制 |
 
 边标签是相邻的 `<text data-idraw-edge-label="边 id">`，逻辑内容存在 `data-idraw-label`（同样用
 `&#10;` 表示换行），位置在路径中点。标签带白色描边（`paint-order="stroke"`），压在线上也
 清楚。
 
-箭头用 `<defs>` 里按**描边颜色**生成的 marker（`idraw-arrow-<颜色>` 与
-`idraw-arrow-start-<颜色>`），不使用 `context-stroke`，也不用 `auto-start-reverse` —— 这两样在
-部分导入器里不生效。双向箭头分别引用 start / end 两个 marker。
+箭头用 `<defs>` 里按**描边颜色 + 实心/空心 + 大小**生成的 marker
+（`idraw-arrow-<颜色>-<大小>` 与 `idraw-arrow-start-<颜色>-<大小>`；空心样式为
+`idraw-arrow-hollow-<颜色>-<大小>` / `idraw-arrow-hollow-start-<颜色>-<大小>`），不使用
+`context-stroke`，也不用 `auto-start-reverse` —— 这两样在部分导入器里不生效。双向箭头分别
+引用 start / end 两个 marker。空心箭头内部用白底填充、描边沿用边的颜色，这样穿进箭头里的
+连线会被盖住。`markerWidth` / `markerHeight` 等于箭头大小倍数。
 
 若一条边指向的节点在文件里不存在，解析时该端点退化成自由端点（坐标取自 `d` 的起止点），
 不会因为一条坏边让整张图打不开。

@@ -29,6 +29,10 @@ import iconPath from '../../build/icon.png?asset'
 
 app.setName('iDraw')
 
+// Linux 的 dock/任务栏名称来自 X11 的 WM_CLASS,它默认取 package.json 的小写 name。
+// setDesktopName 必须在 ready 之前调用,把 WM_CLASS 改成和窗口标题一致的 iDraw。
+if (process.platform === 'linux') app.setDesktopName('iDraw.desktop')
+
 let mainWindow: BrowserWindow | null = null
 let pendingOpenFile: string | null = null
 let lastDir: string | null = null

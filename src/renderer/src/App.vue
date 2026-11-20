@@ -11,7 +11,7 @@
  * `:key` 跟着重建。这里负责文件生命周期、自动保存队列、窗口标题与菜单路由;
  * 画布引擎本身不知道文件系统。
  */
-import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { FilePlus2, LayoutGrid } from 'lucide-vue-next'
 import CanvasPane from './components/CanvasPane.vue'
 import GlobalMenu from './components/GlobalMenu.vue'
@@ -59,6 +59,31 @@ const activeRelPath = ref<string | null>(null)
 const sidebarCollapsed = ref(false)
 /** 仓库列表是否递归显示子目录里的画布(设置 → 布局) */
 const nestedCanvases = ref(nestedCanvasesEnabled())
+
+/** 全局菜单的 props/事件:状态栏内和选择页悬浮各用一份 */
+const globalMenuProps = computed(() => ({
+  hasDocument: !!runtime.value,
+  hasWorkspace: !!workspace.value,
+  readOnly: runtime.value?.readOnly ?? false,
+  canSave: !!runtime.value && !runtime.value.readOnly && runtime.value.ui.dirty,
+  canUndo: runtime.value?.ui.canUndo ?? false,
+  canRedo: runtime.value?.ui.canRedo ?? false,
+  canBack: view.value !== 'picker',
+  gridVisible: runtime.value?.ui.gridVisible ?? null,
+  snap: runtime.value?.ui.snap ?? null,
+  showNestedCanvases: nestedCanvases.value
+}))
+
+const globalMenuHandlers: Record<string, (...args: unknown[]) => void> = {
+  save: () => handleFileAction('save'),
+  'export-png': () => handleFileAction('export-png'),
+  undo: () => runtime.value?.undo(),
+  redo: () => runtime.value?.redo(),
+  'toggle-grid': () => toggleGridFromMenu(),
+  'toggle-snap': () => toggleSnapFromMenu(),
+  'toggle-nested-canvases': () => toggleNestedCanvases(),
+  'back-to-overview': () => backToPicker()
+}
 /** 只有用户主动「新建画布」时才展示模板卡片;打开已有画布/临时画布不弹 */
 const showWelcome = ref(false)
 const dragging = ref(false)
@@ -835,27 +860,18 @@ onBeforeUnmount(() => {
         :has-path="!!currentPath"
         :read-only="runtime?.readOnly ?? false"
         :status="saveStatus"
-      />
+      >
+        <template #actions>
+          <GlobalMenu inline v-bind="globalMenuProps" v-on="globalMenuHandlers" />
+        </template>
+      </StatusBar>
     </template>
 
+    <!-- 仓库选择页没有状态栏,齿轮仍然悬浮在左下角 -->
     <GlobalMenu
-      :has-document="!!runtime"
-      :read-only="runtime?.readOnly ?? false"
-      :can-save="!!runtime && !runtime.readOnly && runtime.ui.dirty"
-      :can-undo="runtime?.ui.canUndo ?? false"
-      :can-redo="runtime?.ui.canRedo ?? false"
-      :can-back="view !== 'picker'"
-      :grid-visible="runtime?.ui.gridVisible ?? null"
-      :snap="runtime?.ui.snap ?? null"
-      :show-nested-canvases="nestedCanvases"
-      @save="handleFileAction('save')"
-      @export-png="handleFileAction('export-png')"
-      @undo="runtime?.undo()"
-      @redo="runtime?.redo()"
-      @toggle-grid="toggleGridFromMenu"
-      @toggle-snap="toggleSnapFromMenu"
-      @toggle-nested-canvases="toggleNestedCanvases"
-      @back-to-overview="backToPicker"
+      v-if="view === 'picker'"
+      v-bind="globalMenuProps"
+      v-on="globalMenuHandlers"
     />
     <WindowControls v-if="showWindowControls" />
     <ThemedDialogHost />

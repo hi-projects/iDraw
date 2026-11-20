@@ -37,6 +37,18 @@
   --editor-line-gutter: 28px;
 }
 
+/*
+ * 让数字输入的步进箭头、滚动条、下拉框等原生控件跟随应用主题。
+ * 之前深色界面里数字框右侧是系统浅色的白色小方块,和界面割裂。
+ */
+:root {
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
+
 :root,
 :root[data-theme='light'] {
   --bg-app: #f4f4f7;
@@ -48,6 +60,8 @@
   --bg-segment-hover: rgba(255, 255, 255, 0.72);
   /* 输入框/下拉的底色 */
   --bg-control: #fafafc;
+  /* 画布底色(用于空心箭头内部、连线标签的遮挡描边) */
+  --canvas-knockout: #ffffff;
   --text-primary: #1b1c21;
   --text-secondary: #60626c;
   --text-tertiary: #9a9ca6;
@@ -105,6 +119,7 @@
   --bg-segment: #2b2c34;
   --bg-segment-hover: rgba(255, 255, 255, 0.06);
   --bg-control: #292a31;
+  --canvas-knockout: var(--bg-editor);
   --text-primary: #ececf1;
   --text-secondary: #a6a7b3;
   --text-tertiary: #6f707d;

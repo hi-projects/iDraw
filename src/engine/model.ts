@@ -62,6 +62,8 @@ export type AnchorSide = 'auto' | 'n' | 'e' | 's' | 'w'
 
 export type EdgeRouting = 'straight' | 'orthogonal' | 'curve'
 export type ArrowMode = 'none' | 'start' | 'end' | 'both'
+/** 箭头填充:实心 / 空心 */
+export type ArrowStyle = 'solid' | 'hollow'
 
 export interface EdgeEnd {
   /** 节点 id;null = 自由端点(坐标在 x/y) */
@@ -77,6 +79,9 @@ export interface EdgeStyle {
   dash: boolean
   fontSize: number
   color: string
+  /** 连线标签的加粗/倾斜 */
+  bold: boolean
+  italic: boolean
 }
 
 export interface CanvasEdge {
@@ -85,6 +90,9 @@ export interface CanvasEdge {
   to: EdgeEnd
   routing: EdgeRouting
   arrow: ArrowMode
+  arrowStyle: ArrowStyle
+  /** 箭头大小(在描边宽度之上的倍数,默认 9) */
+  arrowSize: number
   label: string
   style: EdgeStyle
 }
@@ -152,7 +160,9 @@ export const EDGE_DEFAULTS: EdgeStyle = {
   strokeWidth: 1.5,
   dash: false,
   fontSize: 13,
-  color: '#4b5563'
+  color: '#4b5563',
+  bold: false,
+  italic: false
 }
 
 export function defaultNodeStyle(): NodeStyle {

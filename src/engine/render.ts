@@ -65,16 +65,22 @@ function setAttrs(node: Element, attrs: Record<string, string | number | undefin
   }
 }
 
-function markerId(color: string, start: boolean): string {
+function markerId(color: string, start: boolean, hollow = false, size = 9): string {
   const safe = color.replace(/[^0-9a-zA-Z]/g, '') || 'default'
-  return start ? `idraw-arrow-start-${safe}` : `idraw-arrow-${safe}`
+  const style = hollow ? 'hollow-' : ''
+  return start
+    ? `idraw-arrow-start-${style}${safe}-${size}`
+    : `idraw-arrow-${style}${safe}-${size}`
 }
 
-/** 剪贴板/预览里也要有 marker:按颜色补齐 defs,已存在的不重复建 */
-function ensureMarkers(defs: SVGDefsElement, colors: Iterable<string>): void {
-  for (const color of colors) {
+/** 剪贴板/预览里也要有 marker:按颜色+实心/空心+大小补齐 defs,已存在的不重复建 */
+function ensureMarkers(
+  defs: SVGDefsElement,
+  specs: Iterable<{ color: string; hollow: boolean; size: number }>
+): void {
+  for (const { color, hollow, size } of specs) {
     for (const start of [false, true]) {
-      const id = markerId(color, start)
+      const id = markerId(color, start, hollow, size)
       if (defs.querySelector(`#${id}`)) continue
       const marker = el('marker')
       setAttrs(marker, {
@@ -82,15 +88,19 @@ function ensureMarkers(defs: SVGDefsElement, colors: Iterable<string>): void {
         viewBox: '0 0 10 10',
         refX: start ? 1 : 9,
         refY: 5,
-        markerWidth: 6,
-        markerHeight: 6,
+        markerWidth: size,
+        markerHeight: size,
         markerUnits: 'strokeWidth',
         orient: 'auto'
       })
       const arrow = el('path')
+      if (hollow) arrow.classList.add('canvas-arrow-hollow')
       setAttrs(arrow, {
         d: start ? 'M10,0 L0,5 L10,10 z' : 'M0,0 L10,5 L0,10 z',
-        fill: color
+        fill: hollow ? '#ffffff' : color,
+        stroke: hollow ? color : undefined,
+        'stroke-width': hollow ? 1.2 : undefined,
+        'stroke-linejoin': hollow ? 'round' : undefined
       })
       marker.append(arrow)
       defs.append(marker)
@@ -203,7 +213,13 @@ export class CanvasRenderer {
   renderScene(doc: CanvasDoc, selected: ReadonlySet<string>, editingNode: string | null, editingEdge: string | null, hoverEdge: string | null): void {
     ensureMarkers(
       this.defs,
-      doc.edges.filter(e => e.arrow !== 'none').map(e => e.style.stroke)
+      doc.edges
+        .filter(e => e.arrow !== 'none')
+        .map(e => ({
+          color: e.style.stroke,
+          hollow: e.arrowStyle === 'hollow',
+          size: e.arrowSize
+        }))
     )
 
     // ---- 边 ----
@@ -385,20 +401,30 @@ export class CanvasRenderer {
     }
     const end = edge.arrow === 'end' || edge.arrow === 'both'
     const start = edge.arrow === 'start' || edge.arrow === 'both'
-    path.setAttribute('marker-end', end ? `url(#${markerId(edge.style.stroke, false)})` : '')
-    path.setAttribute('marker-start', start ? `url(#${markerId(edge.style.stroke, true)})` : '')
+    const hollow = edge.arrowStyle === 'hollow'
+    path.setAttribute(
+      'marker-end',
+      end ? `url(#${markerId(edge.style.stroke, false, hollow, edge.arrowSize)})` : ''
+    )
+    path.setAttribute(
+      'marker-start',
+      start ? `url(#${markerId(edge.style.stroke, true, hollow, edge.arrowSize)})` : ''
+    )
   }
 
   private applyEdgeLabel(label: SVGTextElement, edge: CanvasEdge, doc: CanvasDoc): void {
     const g = edgeGeometry(edge, doc)
     const lines = edge.label.split('\n')
     const lh = Math.round(edge.style.fontSize * 1.4)
-    const startY = g.mid.y - 4 - (lines.length - 1) * lh
+    // 让文字块的视觉中心落在连线中点(= 选中框中心),而不是基线偏上
+    const startY = g.mid.y + edge.style.fontSize * 0.35 - ((lines.length - 1) * lh) / 2
     setAttrs(label, {
       x: g.mid.x,
       y: startY,
       'text-anchor': 'middle',
       'font-size': edge.style.fontSize,
+      'font-weight': edge.style.bold ? 600 : 400,
+      'font-style': edge.style.italic ? 'italic' : 'normal',
       fill: edge.style.color,
       stroke: '#ffffff',
       'stroke-width': 4,

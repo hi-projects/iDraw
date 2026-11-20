@@ -238,6 +238,10 @@ async function main() {
     await waitFor(wc, "!document.querySelector('.canvas-new-card')")
   )
   check(
+    '默认缩放为 100%',
+    await waitFor(wc, "document.querySelector('.canvas-zoom-label')?.textContent.trim() === '100%'")
+  )
+  check(
     '临时画布不显示工具栏新建按钮',
     await js(wc, "!document.querySelector('.canvas-new-btn')")
   )
@@ -246,22 +250,35 @@ async function main() {
     await js(wc, "!document.querySelector('.canvas-app-menu-btn')")
   )
   check(
-    '左下角全局菜单按钮存在',
-    await js(wc, "!!document.querySelector('.idraw-corner-btn')")
+    '状态栏有全局菜单按钮',
+    await js(wc, "!!document.querySelector('.idraw-statusbar .idraw-status-actions .idraw-corner-btn')")
   )
-  await js(wc, "document.querySelector('.idraw-corner-btn').click()")
-  check('左下角菜单出现', await waitFor(wc, "!!document.querySelector('.idraw-corner-menu')"))
   check(
-    '菜单包含保存/导出/撤销/重做/返回画布总览/设置',
-    await js(wc, "document.querySelectorAll('.idraw-corner-menu-item').length === 6")
+    '状态栏有返回画布总览图标',
+    await js(wc, "!!document.querySelector('.idraw-statusbar [data-action=back-overview]')")
+  )
+  check(
+    '返回图标在齿轮右侧',
+    await js(
+      wc,
+      `(() => {
+        const actions = document.querySelector('.idraw-status-actions')
+        const gear = actions?.querySelector('.idraw-corner-btn')
+        const back = actions?.querySelector('[data-action=back-overview]')
+        if (!gear || !back) return false
+        return (gear.compareDocumentPosition(back) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
+      })()`
+    )
+  )
+  await js(wc, "document.querySelector('.idraw-statusbar .idraw-corner-btn').click()")
+  check('状态栏菜单出现', await waitFor(wc, "!!document.querySelector('.idraw-corner-menu')"))
+  check(
+    '菜单包含保存/导出/撤销/重做/设置',
+    await js(wc, "document.querySelectorAll('.idraw-corner-menu-item').length === 5")
   )
   check(
     '菜单含设置入口',
     await js(wc, "!!document.querySelector('[data-action=open-settings]')")
-  )
-  check(
-    '菜单含返回画布总览入口',
-    await js(wc, "!!document.querySelector('[data-action=menu-back-overview]')")
   )
   check(
     '画布操作与设置之间有分隔线',
@@ -395,6 +412,133 @@ async function main() {
   )
   check('修改后标题带脏点', (await js(wc, 'document.title')).startsWith('● '))
 
+  console.log('[2.5] 连线属性面板')
+  check(
+    '连线面板分为连线/标签/箭头',
+    await js(
+      wc,
+      `(() => {
+        const titles = [...document.querySelectorAll('.canvas-style-section-title')].map(e => e.textContent.trim())
+        return ['连线', '标签', '箭头'].every(t => titles.includes(t))
+      })()`
+    )
+  )
+  check(
+    '连线方式显示为三个图标',
+    await js(
+      wc,
+      "document.querySelectorAll('.canvas-style-seg[aria-label=\"连线方式\"] .canvas-style-toggle').length === 3"
+    )
+  )
+  check(
+    '箭头方向显示为四个图标',
+    await js(
+      wc,
+      "document.querySelectorAll('.canvas-style-seg[aria-label=\"箭头方向\"] .canvas-style-toggle').length === 4"
+    )
+  )
+  check(
+    '箭头样式显示为两个图标',
+    await js(
+      wc,
+      "document.querySelectorAll('.canvas-style-seg[aria-label=\"箭头样式\"] .canvas-style-toggle').length === 2"
+    )
+  )
+
+  const clickInGroup = (group, label) =>
+    js(
+      wc,
+      `document.querySelector('.canvas-style-seg[aria-label="${group}"] button[aria-label="${label}"]')?.click()`
+    )
+  const groupActive = (group) =>
+    js(
+      wc,
+      `(() => {
+        const seg = document.querySelector('.canvas-style-seg[aria-label="${group}"]')
+        return [...(seg?.querySelectorAll('button') ?? [])]
+          .filter(b => b.classList.contains('active'))
+          .map(b => b.getAttribute('aria-label'))
+      })()`
+    )
+
+  await clickInGroup('连线方式', '直线')
+  await wait(250)
+  let activeIcons = await groupActive('连线方式')
+  check('切到直线后对应图标高亮', activeIcons.includes('直线') && !activeIcons.includes('正交'), activeIcons)
+
+  await clickInGroup('箭头方向', '双向')
+  await wait(250)
+  activeIcons = await groupActive('箭头方向')
+  check('切到双向后对应图标高亮', activeIcons.includes('双向'), activeIcons)
+  check(
+    '双向箭头同时有起点/终点 marker',
+    await js(
+      wc,
+      `[...document.querySelectorAll('[data-idraw-edge]')].some(
+        p => (p.getAttribute('marker-start') || '').includes('url') && (p.getAttribute('marker-end') || '').includes('url')
+      )`
+    )
+  )
+
+  await clickInGroup('箭头样式', '空心箭头')
+  await wait(250)
+  activeIcons = await groupActive('箭头样式')
+  check('切到空心后对应图标高亮', activeIcons.includes('空心箭头'), activeIcons)
+  check(
+    '空心箭头使用 hollow marker',
+    await js(wc, "!!document.querySelector('[data-idraw-edge][marker-end*=\"hollow\"]')")
+  )
+
+  check(
+    '箭头大小默认为 9',
+    await js(wc, "document.querySelector('.canvas-arrow-size')?.value === '9'")
+  )
+
+  await js(
+    wc,
+    `(() => {
+      const input = document.querySelector('.canvas-arrow-size')
+      if (!input) return false
+      input.value = '14'
+      input.dispatchEvent(new Event('change', { bubbles: true }))
+      return true
+    })()`
+  )
+  await wait(250)
+  check(
+    '箭头大小可调',
+    await js(
+      wc,
+      `(() => {
+        const path = [...document.querySelectorAll('[data-idraw-edge]')]
+          .find(p => (p.getAttribute('marker-end') || '').includes('hollow'))
+        if (!path) return false
+        const id = (path.getAttribute('marker-end') || '').match(/#([^)]+)/)?.[1]
+        return !!id && document.getElementById(id)?.getAttribute('markerWidth') === '14'
+      })()`
+    )
+  )
+
+  check(
+    '标签支持加粗/倾斜',
+    await js(
+      wc,
+      "!!document.querySelector('[aria-label=\"标签加粗\"]') && !!document.querySelector('[aria-label=\"标签倾斜\"]')"
+    )
+  )
+  await js(wc, "document.querySelector('[aria-label=\"标签加粗\"]')?.click()")
+  await wait(180)
+  check(
+    '标签加粗可切换',
+    await js(wc, "document.querySelector('[aria-label=\"标签加粗\"]')?.classList.contains('active')")
+  )
+  await js(wc, "document.querySelector('[aria-label=\"标签倾斜\"]')?.click()")
+  await wait(180)
+  check(
+    '标签倾斜可切换',
+    await js(wc, "document.querySelector('[aria-label=\"标签倾斜\"]')?.classList.contains('active')")
+  )
+
   // 临时画布的核心承诺:不自动保存。等待超过自动保存延迟后,不应有写盘动作。
   const writesBeforeIdle = writeCalls
   await wait(1600)
@@ -475,6 +619,38 @@ async function main() {
     !!after && (await waitForPos(after.x, after.y))
   )
 
+  console.log('[4.5] 填充色实时预览 / 上一填充色')
+  const fillOfFirst = () =>
+    js(wc, "document.querySelector('[data-idraw-node] rect')?.getAttribute('fill') || null")
+  const fillBefore = await fillOfFirst()
+  await js(
+    wc,
+    `(() => {
+      const input = document.querySelector('.canvas-style-row input[type=color]')
+      if (!input) return false
+      input.value = '#ff0000'
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      return true
+    })()`
+  )
+  await wait(150)
+  check('拖动填充色时形状立即变色', (await fillOfFirst()) === '#ff0000', {
+    before: fillBefore,
+    now: await fillOfFirst()
+  })
+  await js(
+    wc,
+    "document.querySelector('.canvas-style-row input[type=color]')?.dispatchEvent(new Event('change', { bubbles: true }))"
+  )
+  check('确认后出现上一填充色按钮', await waitFor(wc, "!!document.querySelector('.canvas-color-prev')"))
+  check('RGB 复制按钮存在', await js(wc, "!!document.querySelector('.canvas-color-mini')"))
+  await js(wc, "document.querySelector('.canvas-color-prev')?.click()")
+  await wait(150)
+  check('上一填充色按钮恢复原色', (await fillOfFirst()) === fillBefore, {
+    before: fillBefore,
+    now: await fillOfFirst()
+  })
+
   console.log('[5] 保存')
   wc.send('app:menu-command', 'file:save')
   const savedOk = await (async () => {
@@ -552,7 +728,7 @@ async function main() {
         })()`
       )
       await js(wc, "document.querySelector('.idraw-corner-mask')?.click()")
-      return opened && state.count === 6 && state.saveDisabled && state.exportDisabled && state.undoDisabled
+      return opened && state.count === 5 && state.saveDisabled && state.exportDisabled && state.undoDisabled
     })()
   )
 
@@ -596,7 +772,9 @@ async function main() {
         button: 0, buttons, pointerId: 1, isPrimary: true
       }))
       fire('pointerdown', sx, sy, 1)
+      const cursorDown = surface.style.cursor
       fire('pointermove', sx + size, sy + size, 1)
+      const cursorMove = surface.style.cursor
       const during = document.querySelectorAll('.canvas-marquee').length
       fire('pointerup', sx + size, sy + size, 0)
       return {
@@ -604,12 +782,18 @@ async function main() {
         after: document.querySelectorAll('.canvas-marquee').length,
         selectedBefore,
         selectedAfter: document.querySelectorAll('.canvas-sel-box').length,
+        cursorDown,
+        cursorMove,
+        cursorAfter: surface.style.cursor,
         x: sx,
         y: sy
       }
     })()`
   )
   check('框选过程中出现框选矩形', marquee.during === 1, marquee)
+  check('只按下鼠标时还不是十字光标', marquee.cursorDown !== 'crosshair', marquee)
+  check('按住拖动时才变成十字光标', marquee.cursorMove === 'crosshair', marquee)
+  check('松开鼠标后不再是十字光标', marquee.cursorAfter !== 'crosshair', marquee)
   check('选区没有变化(复现提前返回的路径)', marquee.selectedBefore === marquee.selectedAfter, marquee)
   check('松手后框选矩形消失', marquee.after === 0, marquee)
 
@@ -663,6 +847,13 @@ async function main() {
   check(
     '甘特图生成网格线',
     await waitFor(wc, "document.querySelectorAll('[data-idraw-edge]').length >= 6")
+  )
+  check(
+    '模板插入后不选中形状',
+    await js(
+      wc,
+      "document.querySelectorAll('.canvas-sel-box').length === 0 && !document.querySelector('.canvas-style')"
+    )
   )
 
   // 双击空白处建一个空文本框:即使没有文字,也要有可见的占位框
@@ -834,17 +1025,8 @@ async function main() {
     await js(wc, "!document.querySelector('.canvas-new-btn')")
   )
   check(
-    '齿轮位于画布区域左下角',
-    await js(
-      wc,
-      `(() => {
-        const btn = document.querySelector('.idraw-corner-btn')
-        const sidebar = document.querySelector('.workspace-sidebar')
-        if (!btn || !sidebar) return false
-        const left = parseFloat(getComputedStyle(btn).left)
-        return Math.abs(left - (sidebar.getBoundingClientRect().width + 18)) < 1
-      })()`
-    )
+    '齿轮位于底部状态栏',
+    await js(wc, "!!document.querySelector('.idraw-statusbar .idraw-status-actions .idraw-corner-btn')")
   )
 
   await js(wc, "document.querySelector('.canvas-blank-btn')?.click()")
@@ -925,18 +1107,17 @@ async function main() {
   await js(wc, "document.querySelector('[data-action=workspace-collapse]').click()")
   check('目录栏可以收起', await waitFor(wc, "!!document.querySelector('.workspace-sidebar.collapsed')"))
   check(
-    '收起后齿轮回到窗口左下角',
-    await js(
-      wc,
-      "parseFloat(getComputedStyle(document.querySelector('.idraw-corner-btn')).left) === 18"
-    )
+    '收起侧栏后齿轮仍在状态栏',
+    await js(wc, "!!document.querySelector('.idraw-statusbar .idraw-status-actions .idraw-corner-btn')")
   )
   await js(wc, "document.querySelector('[data-action=workspace-collapse]').click()")
   check('目录栏可以再展开', await waitFor(wc, "!document.querySelector('.workspace-sidebar.collapsed')"))
 
-  await js(wc, "document.querySelector('.idraw-corner-btn').click()")
-  await waitFor(wc, "!!document.querySelector('.idraw-corner-menu')")
-  await js(wc, "document.querySelector('[data-action=menu-back-overview]').click()")
+  check(
+    '仓库模式状态栏有返回总览图标',
+    await js(wc, "!!document.querySelector('.idraw-statusbar [data-action=back-overview]')")
+  )
+  await js(wc, "document.querySelector('.idraw-statusbar [data-action=back-overview]').click()")
   check('从仓库返回选择页', await waitFor(wc, "!!document.querySelector('.workspace-picker')"))
   check(
     '选择页齿轮回到左下角',
@@ -966,7 +1147,7 @@ async function main() {
     /* 无头环境偶尔截不到,不影响断言 */
   }
 
-  console.log('[12] 左下角菜单与主题切换')
+  console.log('[12] 状态栏菜单与主题切换')
   check(
     '旧设置浮标已移除',
     await js(wc, "!document.querySelector('.idraw-fab')")
@@ -984,10 +1165,12 @@ async function main() {
     await js(wc, "!!document.querySelector('.idraw-settings-sidebar')")
   )
   check(
-    '设置分区包含外观/编辑器/布局/关于',
-    await js(wc, "document.querySelectorAll('.idraw-settings-nav-item').length === 4")
+    '未打开目录时设置分区不显示布局',
+    await js(
+      wc,
+      "document.querySelectorAll('.idraw-settings-nav-item').length === 3 && !document.querySelector('[data-section=layout]')"
+    )
   )
-  // 上一次打开设置时停在「布局」,这里显式切回「外观」再测主题
   await js(wc, "document.querySelectorAll('.idraw-settings-nav-item')[0].click()")
   await js(wc, "document.querySelectorAll('.idraw-theme-option')[2].click()")
   check(
@@ -1022,12 +1205,11 @@ async function main() {
   await js(wc, "document.querySelector('.workspace-recent-add-button').click()")
   await js(wc, "document.querySelector('[data-action=temporary-canvas]').click()")
   check('临时画布已打开', await waitFor(wc, "!!document.querySelector('.canvas-surface')"))
-  await js(wc, "document.querySelector('.idraw-corner-btn').click()")
   check(
-    '临时画布下菜单含返回画布总览',
-    await waitFor(wc, "!!document.querySelector('[data-action=menu-back-overview]')")
+    '临时画布状态栏有返回总览图标',
+    await js(wc, "!!document.querySelector('.idraw-statusbar [data-action=back-overview]')")
   )
-  await js(wc, "document.querySelector('[data-action=menu-back-overview]').click()")
+  await js(wc, "document.querySelector('.idraw-statusbar [data-action=back-overview]').click()")
   check(
     '点击返回画布总览后回到选择页',
     await waitFor(wc, "!!document.querySelector('.workspace-picker')")

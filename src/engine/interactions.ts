@@ -355,8 +355,8 @@ export class Interactions {
     }
 
     if (!this.host.readOnly && this.host.tool === 'shape' && this.host.pendingShape) {
+      // 光标在真正拖动后才变十字,单纯按下不算
       this.drag = { kind: 'create', start: p, current: p, moved: false }
-      this.host.setCursor('crosshair')
       return
     }
 
@@ -400,7 +400,6 @@ export class Interactions {
             targetSide: 'n',
             startWorld: p
           }
-          this.host.setCursor('crosshair')
           return
         }
       }
@@ -419,7 +418,6 @@ export class Interactions {
           targetSide: 'n',
           startWorld: p
         }
-        this.host.setCursor('crosshair')
         return
       }
       if (e.shiftKey) {
@@ -459,7 +457,6 @@ export class Interactions {
       base: e.shiftKey ? [...this.host.selected] : [],
       additive: e.shiftKey
     }
-    this.host.setCursor('crosshair')
   }
 
   private onPointerMove = (e: PointerEvent): void => {
@@ -487,12 +484,11 @@ export class Interactions {
       case 'move': {
         const rawDx = p.x - drag.start.x
         const rawDy = p.y - drag.start.y
-        let dx = rawDx
-        let dy = rawDy
-        const primaryOrig = drag.orig.get(drag.primary)
-        if (primaryOrig && this.host.snapEnabled()) {
-          dx = snapToGrid(primaryOrig.x + rawDx, GRID_SIZE) - primaryOrig.x
-          dy = snapToGrid(primaryOrig.y + rawDy, GRID_SIZE) - primaryOrig.y
+        // 拖动和方向键一致,按 1 个单位步进;再叠加边/中心对齐的磁性吸附,
+        // 这样既不会像 20px 网格那样跳格,也能精确对齐到其它形状的中线
+        let dx = Math.round(rawDx)
+        let dy = Math.round(rawDy)
+        if (this.host.snapEnabled()) {
           const snap = alignSnap(
             drag.before,
             dx,
@@ -560,6 +556,9 @@ export class Interactions {
       }
       case 'marquee': {
         drag.current = p
+        if (Math.hypot(p.x - drag.start.x, p.y - drag.start.y) > 2) {
+          this.host.setCursor('crosshair')
+        }
         // 框选过程中不重建场景(那样每帧都是全量 DOM),只更新覆盖层;
         // 选中集合在 pointerup 时一次结算
         this.host.setMarquee(normalizeRect(drag.start, p))
@@ -567,6 +566,10 @@ export class Interactions {
         break
       }
       case 'connect': {
+        // 真正开始拖了才换十字光标
+        if (Math.hypot(p.x - drag.startWorld.x, p.y - drag.startWorld.y) > 2) {
+          this.host.setCursor('crosshair')
+        }
         const target = hitNode(
           this.host.doc,
           p,
@@ -605,6 +608,7 @@ export class Interactions {
         drag.current = p
         drag.moved = Math.hypot(p.x - drag.start.x, p.y - drag.start.y) > 4
         if (drag.moved) {
+          this.host.setCursor('crosshair')
           let rect = normalizeRect(drag.start, p)
           if (this.host.snapEnabled()) {
             rect = {
@@ -746,7 +750,8 @@ export class Interactions {
     if (this.host.tool === 'shape' || this.host.tool === 'text') {
       this.setHoverNode(null)
       this.setHoverEdge(null)
-      this.host.setCursor('crosshair')
+      // 十字光标只在真正按住拖动时出现,空闲悬浮保持普通箭头
+      this.host.setCursor('default')
       return
     }
     const node = hitNode(this.host.doc, p)
@@ -762,13 +767,8 @@ export class Interactions {
       this.host.setCursor(this.host.tool === 'pan' ? 'grab' : 'default')
     } else {
       this.setHoverEdge(null)
-      if (this.host.tool === 'edge') {
-        this.host.setCursor('crosshair')
-      } else if (!this.host.readOnly && this.anchorAt(node, p)) {
-        this.host.setCursor('crosshair')
-      } else {
-        this.host.setCursor(this.host.readOnly ? 'default' : 'move')
-      }
+      // 连线工具/锚点上空悬浮不再变十字:只有按下开始拖动后才切换
+      this.host.setCursor(this.host.readOnly || this.host.tool === 'edge' ? 'default' : 'move')
     }
   }
 
@@ -822,6 +822,8 @@ export class Interactions {
       },
       routing: 'orthogonal' as const,
       arrow: 'end' as const,
+      arrowStyle: 'solid' as const,
+      arrowSize: 9,
       label: '',
       style: newEdgeStyle()
     }

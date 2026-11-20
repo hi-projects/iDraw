@@ -62,13 +62,13 @@ function zoomPercent(): string {
       <button class="canvas-tool-btn" title="缩小" @click="runtime.zoomOut()">
         <ZoomOut :size="14" />
       </button>
-      <button class="canvas-tool-btn canvas-zoom-label" title="重置视图" @click="runtime.resetZoom()">
+      <button class="canvas-tool-btn canvas-zoom-label" title="重置为 100%" @click="runtime.resetZoom()">
         {{ zoomPercent() }}
       </button>
       <button class="canvas-tool-btn" title="放大" @click="runtime.zoomIn()">
         <ZoomIn :size="14" />
       </button>
-      <button class="canvas-tool-btn" title="初始视图" @click="runtime.fitScreen()">
+      <button class="canvas-tool-btn" title="适应画布" @click="runtime.fitScreen()">
         <Maximize2 :size="14" />
       </button>
       <button class="canvas-tool-btn" title="适应内容" @click="runtime.fitContent()">适应内容</button>

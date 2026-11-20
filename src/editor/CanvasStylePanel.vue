@@ -12,17 +12,27 @@ import {
   AlignEndVertical,
   AlignStartHorizontal,
   AlignStartVertical,
+  ArrowLeft,
+  ArrowLeftRight,
+  ArrowRight,
+  Bold,
   BringToFront,
   ChevronDown,
   ChevronUp,
+  Copy,
+  CornerDownRight,
+  Italic,
+  Minus,
   MoveHorizontal,
   MoveVertical,
+  Spline,
   SendToBack,
   Trash2
 } from 'lucide-vue-next'
-import { computed } from 'vue'
-import type { ArrowMode, EdgeRouting, NodeStyle } from '../engine/model'
+import { computed, ref } from 'vue'
+import type { ArrowMode, ArrowStyle, EdgeRouting, EdgeStyle, NodeStyle } from '../engine/model'
 import type { CanvasAlignMode, CanvasDistributeMode, CanvasRuntime } from '../engine/runtime'
+import { pushNotice } from './notice'
 
 const props = defineProps<{ runtime: CanvasRuntime }>()
 
@@ -46,16 +56,76 @@ function patchNode<K extends keyof NodeStyle>(key: K, value: NodeStyle[K]): void
   props.runtime.applyNodeStyle({ [key]: value } as Partial<NodeStyle>)
 }
 
-function applyFill(e: Event): void {
-  patchNode('fill', str(e))
+/* ---------- 颜色:拖动时实时预览,确认时只记一条撤销 ---------- */
+
+const previousFill = ref<string | null>(null)
+/** 本轮填充色编辑开始前的颜色(用于生成撤销记录和"上一填充色") */
+let fillEditStart: string | null = null
+
+function previewNode<K extends keyof NodeStyle>(key: K, e: Event): void {
+  props.runtime.previewNodeStyle({ [key]: str(e) } as Partial<NodeStyle>)
+}
+
+function commitNode<K extends keyof NodeStyle>(key: K, e: Event): void {
+  props.runtime.previewNodeStyle({ [key]: str(e) } as Partial<NodeStyle>)
+  props.runtime.commitStylePreview()
+}
+
+function previewEdge<K extends keyof EdgeStyle>(key: K, e: Event): void {
+  props.runtime.previewEdgeStyle({ [key]: str(e) } as Partial<EdgeStyle>)
+}
+
+function commitEdge<K extends keyof EdgeStyle>(key: K, e: Event): void {
+  props.runtime.previewEdgeStyle({ [key]: str(e) } as Partial<EdgeStyle>)
+  props.runtime.commitStylePreview()
+}
+
+function onFillInput(e: Event): void {
+  if (fillEditStart === null) fillEditStart = props.runtime.ui.nodeStyle?.fill ?? null
+  previewNode('fill', e)
+}
+
+function onFillChange(e: Event): void {
+  if (fillEditStart === null) fillEditStart = props.runtime.ui.nodeStyle?.fill ?? null
+  previewNode('fill', e)
+  props.runtime.commitStylePreview()
+  if (fillEditStart !== null) previousFill.value = fillEditStart
+  fillEditStart = null
 }
 
 function toggleNoFill(e: Event): void {
-  patchNode('fill', checked(e) ? 'none' : '#ffffff')
+  const none = checked(e)
+  const current = props.runtime.ui.nodeStyle?.fill ?? null
+  if (current !== null) previousFill.value = current
+  patchNode('fill', none ? 'none' : '#ffffff')
 }
 
-function applyStroke(e: Event): void {
-  patchNode('stroke', str(e))
+function restorePreviousFill(): void {
+  const prev = previousFill.value
+  if (prev === null) return
+  const current = props.runtime.ui.nodeStyle?.fill ?? null
+  props.runtime.applyNodeStyle({ fill: prev })
+  // 交换两个颜色,按钮可以来回切换
+  previousFill.value = current
+}
+
+function fillRgb(): string | null {
+  const value = props.runtime.ui.nodeStyle?.fill
+  const match = value ? /^#([0-9a-f]{6})$/i.exec(value.trim()) : null
+  if (!match) return null
+  const n = parseInt(match[1], 16)
+  return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`
+}
+
+async function copyFillRgb(): Promise<void> {
+  const rgb = fillRgb()
+  if (!rgb) return
+  try {
+    await navigator.clipboard.writeText(rgb)
+    pushNotice(`已复制 ${rgb}`)
+  } catch {
+    pushNotice('复制失败', 'error')
+  }
 }
 
 function applyStrokeWidth(e: Event): void {
@@ -72,10 +142,6 @@ function applyRadius(e: Event): void {
 
 function applyFontSize(e: Event): void {
   patchNode('fontSize', Math.max(6, num(e)))
-}
-
-function applyColor(e: Event): void {
-  patchNode('color', str(e))
 }
 
 function applyBold(): void {
@@ -96,10 +162,6 @@ function applyValign(valign: NodeStyle['valign']): void {
   patchNode('valign', valign)
 }
 
-function edgeStroke(e: Event): void {
-  props.runtime.applyEdgeStyle({ stroke: str(e) })
-}
-
 function edgeWidth(e: Event): void {
   props.runtime.applyEdgeStyle({ strokeWidth: Math.max(0, num(e)) })
 }
@@ -112,16 +174,30 @@ function edgeFontSize(e: Event): void {
   props.runtime.applyEdgeStyle({ fontSize: Math.max(6, num(e)) })
 }
 
-function edgeColor(e: Event): void {
-  props.runtime.applyEdgeStyle({ color: str(e) })
+function edgeBold(): void {
+  const style = props.runtime.ui.edgeStyle
+  if (style) props.runtime.applyEdgeStyle({ bold: !style.bold })
 }
 
-function edgeRouting(e: Event): void {
-  props.runtime.setEdgeRouting(str(e) as EdgeRouting)
+function edgeItalic(): void {
+  const style = props.runtime.ui.edgeStyle
+  if (style) props.runtime.applyEdgeStyle({ italic: !style.italic })
 }
 
-function edgeArrow(e: Event): void {
-  props.runtime.setEdgeArrow(str(e) as ArrowMode)
+function applyRouting(routing: EdgeRouting): void {
+  props.runtime.setEdgeRouting(routing)
+}
+
+function applyArrow(arrow: ArrowMode): void {
+  props.runtime.setEdgeArrow(arrow)
+}
+
+function applyArrowStyle(style: ArrowStyle): void {
+  props.runtime.setEdgeArrowStyle(style)
+}
+
+function changeArrowSize(e: Event): void {
+  props.runtime.setEdgeArrowSize(num(e))
 }
 
 function align(mode: CanvasAlignMode): void {
@@ -143,20 +219,59 @@ function distribute(mode: CanvasDistributeMode): void {
     </div>
 
     <template v-if="ns">
+      <div class="canvas-style-section-title">形状</div>
       <div class="canvas-style-row">
         <label class="canvas-style-label">填充</label>
         <input
           type="color"
           :value="ns.fill === 'none' ? '#ffffff' : ns.fill"
-          :disabled="ns.fill === 'none'"
-          @change="applyFill"
+          @input="onFillInput"
+          @change="onFillChange"
         />
+        <button
+          class="canvas-color-mini"
+          title="复制填充 RGB"
+          :disabled="ns.fill === 'none'"
+          @click="copyFillRgb"
+        >
+          <Copy :size="12" />
+        </button>
+        <button
+          v-if="previousFill"
+          class="canvas-color-prev"
+          :class="{ 'is-none': previousFill === 'none' }"
+          :style="previousFill === 'none' ? undefined : { background: previousFill }"
+          :title="previousFill === 'none' ? '恢复为无填充' : '恢复上一填充色'"
+          @click="restorePreviousFill"
+        ></button>
         <label class="canvas-style-check">
           <input type="checkbox" :checked="ns.fill === 'none'" @change="toggleNoFill" />
           无填充
         </label>
+      </div>
+      <div class="canvas-style-row">
         <label class="canvas-style-label">描边</label>
-        <input type="color" :value="ns.stroke" @change="applyStroke" />
+        <input
+          type="color"
+          :value="ns.stroke"
+          @input="previewNode('stroke', $event)"
+          @change="commitNode('stroke', $event)"
+        />
+      </div>
+      <div
+        v-if="runtime.ui.shape === 'roundRect' || runtime.ui.shape === 'rect'"
+        class="canvas-style-row"
+      >
+        <label class="canvas-style-label">圆角</label>
+        <input
+          class="canvas-style-number"
+          type="number"
+          min="0"
+          max="80"
+          step="1"
+          :value="ns.radius"
+          @change="applyRadius"
+        />
       </div>
       <div class="canvas-style-row">
         <label class="canvas-style-label">线宽</label>
@@ -173,18 +288,25 @@ function distribute(mode: CanvasDistributeMode): void {
           <input type="checkbox" :checked="ns.dash" @change="applyDash" />
           虚线
         </label>
-        <template v-if="runtime.ui.shape === 'roundRect' || runtime.ui.shape === 'rect'">
-          <label class="canvas-style-label">圆角</label>
-          <input
-            class="canvas-style-number"
-            type="number"
-            min="0"
-            max="80"
-            step="1"
-            :value="ns.radius"
-            @change="applyRadius"
-          />
-        </template>
+      </div>
+
+      <div class="canvas-style-sep"></div>
+
+      <div class="canvas-style-section-title">字体</div>
+      <div class="canvas-style-row">
+        <label class="canvas-style-label">字体颜色</label>
+        <input
+          type="color"
+          :value="ns.color"
+          @input="previewNode('color', $event)"
+          @change="commitNode('color', $event)"
+        />
+        <button class="canvas-style-toggle" :class="{ active: ns.bold }" @click="applyBold">
+          B
+        </button>
+        <button class="canvas-style-toggle" :class="{ active: ns.italic }" @click="applyItalic">
+          I
+        </button>
       </div>
       <div class="canvas-style-row">
         <label class="canvas-style-label">字号</label>
@@ -197,17 +319,9 @@ function distribute(mode: CanvasDistributeMode): void {
           :value="ns.fontSize"
           @change="applyFontSize"
         />
-        <label class="canvas-style-label">文字</label>
-        <input type="color" :value="ns.color" @change="applyColor" />
-        <button class="canvas-style-toggle" :class="{ active: ns.bold }" @click="applyBold">
-          B
-        </button>
-        <button class="canvas-style-toggle" :class="{ active: ns.italic }" @click="applyItalic">
-          I
-        </button>
       </div>
       <div class="canvas-style-row">
-        <label class="canvas-style-label">水平</label>
+        <label class="canvas-style-label">水平对齐</label>
         <button class="canvas-style-toggle" :class="{ active: ns.align === 'left' }" @click="applyAlign('left')">
           左
         </button>
@@ -217,7 +331,9 @@ function distribute(mode: CanvasDistributeMode): void {
         <button class="canvas-style-toggle" :class="{ active: ns.align === 'right' }" @click="applyAlign('right')">
           右
         </button>
-        <label class="canvas-style-label">垂直</label>
+      </div>
+      <div class="canvas-style-row">
+        <label class="canvas-style-label">垂直对齐</label>
         <button class="canvas-style-toggle" :class="{ active: ns.valign === 'top' }" @click="applyValign('top')">
           上
         </button>
@@ -231,9 +347,18 @@ function distribute(mode: CanvasDistributeMode): void {
     </template>
 
     <template v-if="es">
+      <div v-if="ns" class="canvas-style-sep"></div>
+      <div class="canvas-style-section-title">连线</div>
       <div class="canvas-style-row">
-        <label class="canvas-style-label">颜色</label>
-        <input type="color" :value="es.stroke" @change="edgeStroke" />
+        <label class="canvas-style-label">连线颜色</label>
+        <input
+          type="color"
+          :value="es.stroke"
+          @input="previewEdge('stroke', $event)"
+          @change="commitEdge('stroke', $event)"
+        />
+      </div>
+      <div class="canvas-style-row">
         <label class="canvas-style-label">线宽</label>
         <input
           class="canvas-style-number"
@@ -250,20 +375,40 @@ function distribute(mode: CanvasDistributeMode): void {
         </label>
       </div>
       <div class="canvas-style-row">
-        <label class="canvas-style-label">路由</label>
-        <select class="canvas-style-select" @change="edgeRouting">
-          <option value="orthogonal">正交</option>
-          <option value="straight">直线</option>
-          <option value="curve">曲线</option>
-        </select>
-        <label class="canvas-style-label">箭头</label>
-        <select class="canvas-style-select" @change="edgeArrow">
-          <option value="end">终点</option>
-          <option value="start">起点</option>
-          <option value="both">双向</option>
-          <option value="none">无</option>
-        </select>
+        <label class="canvas-style-label">连线样式</label>
+        <div class="canvas-style-seg" role="group" aria-label="连线方式">
+          <button
+            class="canvas-style-toggle"
+            :class="{ active: runtime.ui.edgeRouting === 'orthogonal' }"
+            title="正交"
+            aria-label="正交"
+            @click="applyRouting('orthogonal')"
+          >
+            <CornerDownRight :size="15" />
+          </button>
+          <button
+            class="canvas-style-toggle"
+            :class="{ active: runtime.ui.edgeRouting === 'straight' }"
+            title="直线"
+            aria-label="直线"
+            @click="applyRouting('straight')"
+          >
+            <Minus :size="15" />
+          </button>
+          <button
+            class="canvas-style-toggle"
+            :class="{ active: runtime.ui.edgeRouting === 'curve' }"
+            title="曲线"
+            aria-label="曲线"
+            @click="applyRouting('curve')"
+          >
+            <Spline :size="15" />
+          </button>
+        </div>
       </div>
+
+      <div class="canvas-style-sep"></div>
+      <div class="canvas-style-section-title">标签</div>
       <div class="canvas-style-row">
         <label class="canvas-style-label">标签字号</label>
         <input
@@ -275,8 +420,123 @@ function distribute(mode: CanvasDistributeMode): void {
           :value="es.fontSize"
           @change="edgeFontSize"
         />
-        <label class="canvas-style-label">标签色</label>
-        <input type="color" :value="es.color" @change="edgeColor" />
+      </div>
+      <div class="canvas-style-row">
+        <label class="canvas-style-label">标签颜色</label>
+        <input
+          type="color"
+          :value="es.color"
+          @input="previewEdge('color', $event)"
+          @change="commitEdge('color', $event)"
+        />
+        <button
+          class="canvas-style-toggle"
+          :class="{ active: es.bold }"
+          title="标签加粗"
+          aria-label="标签加粗"
+          @click="edgeBold"
+        >
+          <Bold :size="14" />
+        </button>
+        <button
+          class="canvas-style-toggle"
+          :class="{ active: es.italic }"
+          title="标签倾斜"
+          aria-label="标签倾斜"
+          @click="edgeItalic"
+        >
+          <Italic :size="14" />
+        </button>
+      </div>
+
+      <div class="canvas-style-sep"></div>
+      <div class="canvas-style-section-title">箭头</div>
+      <div class="canvas-style-row">
+        <label class="canvas-style-label">箭头方向</label>
+        <div class="canvas-style-seg" role="group" aria-label="箭头方向">
+          <button
+            class="canvas-style-toggle"
+            :class="{ active: runtime.ui.edgeArrow === 'end' }"
+            title="终点"
+            aria-label="终点"
+            @click="applyArrow('end')"
+          >
+            <ArrowRight :size="15" />
+          </button>
+          <button
+            class="canvas-style-toggle"
+            :class="{ active: runtime.ui.edgeArrow === 'start' }"
+            title="起点"
+            aria-label="起点"
+            @click="applyArrow('start')"
+          >
+            <ArrowLeft :size="15" />
+          </button>
+          <button
+            class="canvas-style-toggle"
+            :class="{ active: runtime.ui.edgeArrow === 'both' }"
+            title="双向"
+            aria-label="双向"
+            @click="applyArrow('both')"
+          >
+            <ArrowLeftRight :size="15" />
+          </button>
+          <button
+            class="canvas-style-toggle"
+            :class="{ active: runtime.ui.edgeArrow === 'none' }"
+            title="无箭头"
+            aria-label="无箭头"
+            @click="applyArrow('none')"
+          >
+            <Minus :size="15" />
+          </button>
+        </div>
+      </div>
+
+      <div class="canvas-style-row">
+        <label class="canvas-style-label">箭头样式</label>
+        <div class="canvas-style-seg" role="group" aria-label="箭头样式">
+          <button
+            class="canvas-style-toggle"
+            :class="{ active: runtime.ui.edgeArrowStyle === 'solid' }"
+            title="实心箭头"
+            aria-label="实心箭头"
+            @click="applyArrowStyle('solid')"
+          >
+            <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+              <path d="M6 6l12 6-12 6z" fill="currentColor" />
+            </svg>
+          </button>
+          <button
+            class="canvas-style-toggle"
+            :class="{ active: runtime.ui.edgeArrowStyle === 'hollow' }"
+            title="空心箭头"
+            aria-label="空心箭头"
+            @click="applyArrowStyle('hollow')"
+          >
+            <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+              <path
+                d="M6 6l12 6-12 6z"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="canvas-style-row">
+        <label class="canvas-style-label">箭头大小</label>
+        <input
+          class="canvas-style-number canvas-arrow-size"
+          type="number"
+          min="2"
+          max="20"
+          step="1"
+          :value="runtime.ui.edgeArrowSize ?? 9"
+          @change="changeArrowSize"
+        />
       </div>
     </template>
 

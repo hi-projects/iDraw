@@ -54,18 +54,23 @@ function escText(value: string): string {
   return esc(value.replace(/\r\n/g, '\n'))
 }
 
-function markerId(color: string, start: boolean): string {
+function markerId(color: string, start: boolean, hollow = false, size = 9): string {
   const safe = color.replace(/[^0-9a-zA-Z]/g, '') || 'default'
-  return start ? `idraw-arrow-start-${safe}` : `idraw-arrow-${safe}`
+  const style = hollow ? 'hollow-' : ''
+  const suffix = `-${size}`
+  return start ? `idraw-arrow-start-${style}${safe}${suffix}` : `idraw-arrow-${style}${safe}${suffix}`
 }
 
-function markerDefs(stroke: string): string {
+function markerDefs(stroke: string, hollow: boolean, size: number): string {
   // orient="auto" + 单独的反向 marker:有些导入器不认 auto-start-reverse
-  const end = `<marker id="${markerId(stroke, false)}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" markerUnits="strokeWidth" orient="auto">
-      <path d="M0,0 L10,5 L0,10 z" fill="${esc(stroke)}"/>
+  // 空心箭头用白底 + 描边,把穿进箭头里的连线盖住
+  const fill = hollow ? '#ffffff' : esc(stroke)
+  const outline = hollow ? ` stroke="${esc(stroke)}" stroke-width="1.2" stroke-linejoin="round"` : ''
+  const end = `<marker id="${markerId(stroke, false, hollow, size)}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="${num(size)}" markerHeight="${num(size)}" markerUnits="strokeWidth" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="${fill}"${outline}/>
     </marker>`
-  const start = `<marker id="${markerId(stroke, true)}" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="6" markerHeight="6" markerUnits="strokeWidth" orient="auto">
-      <path d="M10,0 L0,5 L10,10 z" fill="${esc(stroke)}"/>
+  const start = `<marker id="${markerId(stroke, true, hollow, size)}" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="${num(size)}" markerHeight="${num(size)}" markerUnits="strokeWidth" orient="auto">
+      <path d="M10,0 L0,5 L10,10 z" fill="${fill}"${outline}/>
     </marker>`
   return end + '\n    ' + start
 }
@@ -130,6 +135,8 @@ function edgeMarkup(edge: CanvasEdge, doc: CanvasDoc): string {
   attrs.push(
     `data-idraw-routing="${edge.routing}"`,
     `data-idraw-arrow="${edge.arrow}"`,
+    `data-idraw-arrow-style="${edge.arrowStyle}"`,
+    `data-idraw-arrow-size="${num(edge.arrowSize)}"`,
     `d="${g.d}"`,
     'fill="none"',
     `stroke="${esc(edge.style.stroke)}"`,
@@ -138,24 +145,26 @@ function edgeMarkup(edge: CanvasEdge, doc: CanvasDoc): string {
   if (edge.style.dash) {
     attrs.push(`stroke-dasharray="${num(edge.style.strokeWidth * 3)} ${num(edge.style.strokeWidth * 2)}"`)
   }
+  const hollow = edge.arrowStyle === 'hollow'
   if (edge.arrow === 'end' || edge.arrow === 'both') {
-    attrs.push(`marker-end="url(#${markerId(edge.style.stroke, false)})"`)
+    attrs.push(`marker-end="url(#${markerId(edge.style.stroke, false, hollow, edge.arrowSize)})"`)
   }
   if (edge.arrow === 'start' || edge.arrow === 'both') {
-    attrs.push(`marker-start="url(#${markerId(edge.style.stroke, true)})"`)
+    attrs.push(`marker-start="url(#${markerId(edge.style.stroke, true, hollow, edge.arrowSize)})"`)
   }
 
   let label = ''
   if (edge.label) {
     const lines = edge.label.split('\n')
     const lh = lineHeightOf(edge.style.fontSize)
-    const baseline = -4 - (lines.length - 1) * lh
+    // 与编辑器渲染保持一致:文字块中心对齐连线中点
+    const baseline = edge.style.fontSize * 0.35 - ((lines.length - 1) * lh) / 2
     const startY = g.mid.y + baseline
     const tspans = lines
       .map((line, i) => `<tspan x="${num(g.mid.x)}" y="${num(startY + i * lh)}">${escText(line)}</tspan>`)
       .join('')
     label = `
-      <text data-idraw-edge-label="${esc(edge.id)}" data-idraw-label="${escAttrText(edge.label)}" x="${num(g.mid.x)}" y="${num(startY)}" text-anchor="middle" font-family="${esc(fontFamily())}" font-size="${num(edge.style.fontSize)}" fill="${esc(edge.style.color)}" stroke="#ffffff" stroke-width="4" paint-order="stroke" stroke-linejoin="round">${tspans}</text>`
+      <text data-idraw-edge-label="${esc(edge.id)}" data-idraw-label="${escAttrText(edge.label)}" x="${num(g.mid.x)}" y="${num(startY)}" text-anchor="middle" font-family="${esc(fontFamily())}" font-size="${num(edge.style.fontSize)}" font-weight="${edge.style.bold ? 600 : 400}" font-style="${edge.style.italic ? 'italic' : 'normal'}" fill="${esc(edge.style.color)}" stroke="#ffffff" stroke-width="4" paint-order="stroke" stroke-linejoin="round">${tspans}</text>`
   }
   return `    <path ${attrs.join(' ')}/>${label}`
 }
@@ -163,11 +172,19 @@ function edgeMarkup(edge: CanvasEdge, doc: CanvasDoc): string {
 /** 场景 → SVG 文本 */
 export function serializeCanvas(doc: CanvasDoc): string {
   const vb = computedViewBox(doc)
-  const colors = new Set<string>()
+  const markers = new Map<string, { stroke: string; hollow: boolean; size: number }>()
   for (const e of doc.edges) {
-    if (e.arrow !== 'none') colors.add(e.style.stroke)
+    if (e.arrow === 'none') continue
+    const hollow = e.arrowStyle === 'hollow'
+    markers.set(`${e.style.stroke}|${hollow}|${e.arrowSize}`, {
+      stroke: e.style.stroke,
+      hollow,
+      size: e.arrowSize
+    })
   }
-  const defs = [...colors].map(c => markerDefs(c)).join('\n    ')
+  const defs = [...markers.values()]
+    .map(m => markerDefs(m.stroke, m.hollow, m.size))
+    .join('\n    ')
   const edges = doc.edges.map(e => edgeMarkup(e, doc)).join('\n')
   const nodes = doc.nodes.map(n => nodeMarkup(n)).join('\n')
 
@@ -340,6 +357,8 @@ function parseEdge(el: Element, label: string, labelEl: Element | null): CanvasE
     to: readEnd(el, 'to'),
     routing: ROUTINGS.has(routingRaw) ? (routingRaw as EdgeRouting) : 'orthogonal',
     arrow: ARROWS.has(arrowRaw) ? (arrowRaw as ArrowMode) : 'end',
+    arrowStyle: attr(el, 'data-idraw-arrow-style') === 'hollow' ? 'hollow' : 'solid',
+    arrowSize: Math.min(20, Math.max(2, fnum(el.getAttribute('data-idraw-arrow-size'), 9))),
     label,
     style: {
       ...base,
@@ -347,7 +366,9 @@ function parseEdge(el: Element, label: string, labelEl: Element | null): CanvasE
       strokeWidth: fnum(el.getAttribute('stroke-width'), base.strokeWidth),
       dash: !!strAttr(el, 'stroke-dasharray', ''),
       fontSize: fnum(labelEl?.getAttribute('font-size') ?? null, base.fontSize),
-      color: strAttr(labelEl, 'fill', base.color)
+      color: strAttr(labelEl, 'fill', base.color),
+      bold: /bold|[6-9]00/.test(strAttr(labelEl, 'font-weight', '')),
+      italic: strAttr(labelEl, 'font-style', '') === 'italic'
     }
   }
 }

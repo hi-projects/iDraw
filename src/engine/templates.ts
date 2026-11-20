@@ -15,7 +15,8 @@ import {
   PAGE_WIDTH,
   defaultEdgeStyle,
   defaultNodeStyle,
-  emptyDoc
+  emptyDoc,
+  newEdgeStyle
 } from './model'
 
 export type TemplateKind = 'blank' | 'flowchart' | 'architecture' | 'gantt'
@@ -66,8 +67,10 @@ function edge(
     to: { node: to, anchor: opts?.toAnchor ?? 'auto', x: 0, y: 0 },
     routing: 'orthogonal',
     arrow: 'end',
+    arrowStyle: 'solid',
+    arrowSize: 9,
     label: opts?.label ?? '',
-    style: { ...defaultEdgeStyle() }
+    style: { ...newEdgeStyle() }
   }
 }
 
@@ -147,6 +150,8 @@ function gantt(): CanvasDoc {
       to: { node: null, anchor: 'auto', x: x2, y: y2 },
       routing: 'straight',
       arrow: 'none',
+      arrowStyle: 'solid',
+      arrowSize: 9,
       label: '',
       style: { ...defaultEdgeStyle(), stroke: '#eef0f5', strokeWidth: 1, dash: false }
     })

@@ -9,6 +9,7 @@
  */
 import { reactive } from 'vue'
 import {
+  type ArrowStyle,
   type CanvasDoc,
   type CanvasEdge,
   type CanvasNode,
@@ -82,6 +83,11 @@ export interface CanvasUiState {
   /** 属性面板用的样式快照(不是场景对象的引用,避免面板写穿场景) */
   nodeStyle: NodeStyle | null
   edgeStyle: EdgeStyle | null
+  /** 单条选中连线的路由/箭头状态(用于属性面板的分段按钮) */
+  edgeRouting: EdgeRouting | null
+  edgeArrow: CanvasEdge['arrow'] | null
+  edgeArrowStyle: ArrowStyle | null
+  edgeArrowSize: number | null
   shape: ShapeKind | null
   nodeCount: number
   edgeCount: number
@@ -189,6 +195,10 @@ export class CanvasRuntime {
       selectedCount: 0,
       nodeStyle: null,
       edgeStyle: null,
+      edgeRouting: null,
+      edgeArrow: null,
+      edgeArrowStyle: null,
+      edgeArrowSize: null,
       shape: null,
       nodeCount: this.doc.nodes.length,
       edgeCount: this.doc.edges.length,
@@ -285,7 +295,7 @@ export class CanvasRuntime {
     this.interactions = new Interactions(this.interactionHost())
     if (!this.viewportInitialized) {
       this.viewportInitialized = true
-      this.fitScreen()
+      this.resetView()
     } else {
       this.renderer.setViewport(this.viewport)
       this.lastSurfaceSize = this.renderer.size
@@ -459,13 +469,14 @@ export class CanvasRuntime {
     if (this.readOnly) return
     this.ui.tool = tool
     if (tool !== 'shape') this.ui.pendingShape = null
-    this.setCursor(tool === 'pan' ? 'grab' : tool === 'select' ? 'default' : 'crosshair')
+    // 十字光标只留给真正按下拖动的瞬间,选好工具后空闲悬浮仍是普通箭头
+    this.setCursor(tool === 'pan' ? 'grab' : 'default')
   }
 
   setPendingShape(shape: ShapeKind | null): void {
     this.ui.pendingShape = shape
     this.ui.tool = shape ? 'shape' : 'select'
-    this.setCursor(shape ? 'crosshair' : 'default')
+    this.setCursor('default')
   }
 
   setSnap(enabled: boolean): void {
@@ -514,10 +525,24 @@ export class CanvasRuntime {
   }
 
   resetZoom(): void {
-    this.fitScreen()
+    this.resetView()
   }
 
-  /** 适应页面(默认) */
+  /**
+   * 默认视图:固定 100% 缩放,内容居中;还没有内容时居中页面。
+   * 打开文件、新建画布都从这里开始,不再默认缩到"适应页面"。
+   */
+  private resetView(): void {
+    const size = this.renderer?.size ?? { w: 1200, h: 800 }
+    const rect = contentBounds(this.doc) ?? computedViewBox(this.doc)
+    const cx = rect.x + rect.w / 2
+    const cy = rect.y + rect.h / 2
+    this.setViewport({ scale: 1, tx: size.w / 2 - cx, ty: size.h / 2 - cy })
+    this.lastSurfaceSize = this.renderer ? size : null
+    this.renderAll()
+  }
+
+  /** 适应页面 */
   fitScreen(): void {
     const vb = computedViewBox(this.doc)
     this.fitRect(vb.x, vb.y, vb.w, vb.h)
@@ -1048,6 +1073,10 @@ export class CanvasRuntime {
     this.ui.selectedCount = nodes.length + edges.length
     this.ui.nodeStyle = nodes[0] ? { ...nodes[0].style } : null
     this.ui.edgeStyle = edges[0] ? { ...edges[0].style } : null
+    this.ui.edgeRouting = edges[0]?.routing ?? null
+    this.ui.edgeArrow = edges[0]?.arrow ?? null
+    this.ui.edgeArrowStyle = edges[0]?.arrowStyle ?? null
+    this.ui.edgeArrowSize = edges[0]?.arrowSize ?? null
     this.ui.shape = nodes.length === 1 ? nodes[0]!.shape : null
     this.ui.nodeCount = this.doc.nodes.length
     this.ui.edgeCount = this.doc.edges.length
@@ -1065,8 +1094,72 @@ export class CanvasRuntime {
 
   // ---------- 样式 / 排列 ----------
 
+  /**
+   * 颜色拖动中的临时预览:只改场景并重绘,不进撤销栈。
+   * 第一次预览时记录选中对象的快照,确认时由 commitStylePreview 合并成一条记录。
+   */
+  previewNodeStyle(patch: Partial<NodeStyle>): void {
+    if (this.readOnly) return
+    const nodes = this.selectedNodes()
+    if (nodes.length === 0) return
+    this.beginStylePreview()
+    for (const n of nodes) Object.assign(n.style, patch)
+    this.renderAll()
+  }
+
+  previewEdgeStyle(patch: Partial<EdgeStyle>): void {
+    if (this.readOnly) return
+    const edges = this.selectedEdges()
+    if (edges.length === 0) return
+    this.beginStylePreview()
+    for (const e of edges) Object.assign(e.style, patch)
+    this.renderAll()
+  }
+
+  private stylePreview: { nodes: Map<string, CanvasNode>; edges: Map<string, CanvasEdge> } | null =
+    null
+
+  private beginStylePreview(): void {
+    if (this.stylePreview) return
+    const nodes = new Map<string, CanvasNode>()
+    for (const n of this.selectedNodes()) nodes.set(n.id, cloneNode(n))
+    const edges = new Map<string, CanvasEdge>()
+    for (const e of this.selectedEdges()) edges.set(e.id, cloneEdge(e))
+    this.stylePreview = { nodes, edges }
+  }
+
+  /** 确认颜色预览:把这一轮拖动产生的改动合并成一条撤销记录 */
+  commitStylePreview(): void {
+    const snapshot = this.stylePreview
+    this.stylePreview = null
+    if (!snapshot || this.readOnly) return
+    const beforeNodes: CanvasNode[] = []
+    const afterNodes: CanvasNode[] = []
+    for (const before of snapshot.nodes.values()) {
+      const now = findNode(this.doc, before.id)
+      if (!now) continue
+      beforeNodes.push(before)
+      afterNodes.push(cloneNode(now))
+    }
+    const diff = nodeDiffPatches(beforeNodes, afterNodes)
+    const undo: Patch[] = [...diff.undo]
+    const redo: Patch[] = [...diff.redo]
+    for (const before of snapshot.edges.values()) {
+      const now = findEdge(this.doc, before.id)
+      if (!now) continue
+      if (JSON.stringify(before.style) === JSON.stringify(now.style)) continue
+      undo.push({ op: 'replaceEdge', id: before.id, edge: before })
+      redo.push({ op: 'replaceEdge', id: now.id, edge: cloneEdge(now) })
+    }
+    if (undo.length === 0) return
+    this.commit(undo, redo, true)
+    this.renderAll()
+  }
+
   applyNodeStyle(patch: Partial<NodeStyle>): void {
     if (this.readOnly) return
+    // 如果颜色预览还没确认,先把它单独记一笔,避免和这次改动混在一起
+    if (this.stylePreview) this.commitStylePreview()
     const nodes = this.selectedNodes()
     if (nodes.length === 0) return
     const before = nodes.map(cloneNode)
@@ -1079,6 +1172,7 @@ export class CanvasRuntime {
 
   applyEdgeStyle(patch: Partial<EdgeStyle>): void {
     if (this.readOnly) return
+    if (this.stylePreview) this.commitStylePreview()
     const edges = this.selectedEdges()
     if (edges.length === 0) return
     const undo: Patch[] = []
@@ -1118,6 +1212,39 @@ export class CanvasRuntime {
     for (const e of edges) {
       const before = cloneEdge(e)
       e.arrow = arrow
+      undo.push({ op: 'replaceEdge', id: e.id, edge: before })
+      redo.push({ op: 'replaceEdge', id: e.id, edge: cloneEdge(e) })
+    }
+    this.commit(undo, redo, true)
+    this.renderAll()
+  }
+
+  setEdgeArrowSize(size: number): void {
+    if (this.readOnly) return
+    const edges = this.selectedEdges()
+    if (edges.length === 0) return
+    const next = Math.min(20, Math.max(2, Math.round(size)))
+    const undo: Patch[] = []
+    const redo: Patch[] = []
+    for (const e of edges) {
+      const before = cloneEdge(e)
+      e.arrowSize = next
+      undo.push({ op: 'replaceEdge', id: e.id, edge: before })
+      redo.push({ op: 'replaceEdge', id: e.id, edge: cloneEdge(e) })
+    }
+    this.commit(undo, redo, true)
+    this.renderAll()
+  }
+
+  setEdgeArrowStyle(style: ArrowStyle): void {
+    if (this.readOnly) return
+    const edges = this.selectedEdges()
+    if (edges.length === 0) return
+    const undo: Patch[] = []
+    const redo: Patch[] = []
+    for (const e of edges) {
+      const before = cloneEdge(e)
+      e.arrowStyle = style
       undo.push({ op: 'replaceEdge', id: e.id, edge: before })
       redo.push({ op: 'replaceEdge', id: e.id, edge: cloneEdge(e) })
     }
@@ -1280,7 +1407,8 @@ export class CanvasRuntime {
     const redo: Patch[] = []
     nodes.forEach((n, i) => redo.push({ op: 'addNode', index: startNode + i, node: cloneNode(n) }))
     edges.forEach((e, i) => redo.push({ op: 'addEdge', index: startEdge + i, edge: cloneEdge(e) }))
-    this.selection = new Set(nodes.map(n => n.id))
+    // 模板只是展示:插入后不选中任何形状,避免一进画布就带着一整片选区
+    this.selection.clear()
     this.commit(undo, redo, true)
     this.renderAll()
   }

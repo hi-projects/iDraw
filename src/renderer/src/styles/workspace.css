@@ -842,6 +842,21 @@
   min-width: 0;
 }
 
+/* 状态栏左侧的操作图标(全局菜单 + 返回画布总览) */
+.idraw-status-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.idraw-status-divider {
+  flex: 0 0 auto;
+  width: 1px;
+  height: 12px;
+  margin: 0 2px;
+  background: var(--border);
+}
+
 .idraw-status-name {
   font-weight: 600;
   color: var(--text-secondary);

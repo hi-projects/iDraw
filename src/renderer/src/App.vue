@@ -4,7 +4,7 @@
  *
  * 启动先进入仓库选择页,有三种使用方式:
  *  - 打开一个目录作为仓库:目录里的 `.svg` 是多张画布,编辑后自动保存;
- *  - 临时画布:只在当前会话里存在,不自动保存;
+ *  - 临时画布:只在当前会话里存在,手动保存到文件后才开始自动保存;
  *  - 打开单个 SVG 文件:与临时画布一样手动保存。
  *
  * 一份画布一个 CanvasRuntime:切换/新建/打开时重建运行时,CanvasPane 用
@@ -16,6 +16,7 @@ import { FilePlus2, LayoutGrid } from 'lucide-vue-next'
 import CanvasPane from './components/CanvasPane.vue'
 import GlobalMenu from './components/GlobalMenu.vue'
 import StatusBar from './components/StatusBar.vue'
+import ThemeToggle from './components/ThemeToggle.vue'
 import ThemedDialogHost from './components/ThemedDialogHost.vue'
 import WindowControls from './components/WindowControls.vue'
 import WorkspacePicker from './components/WorkspacePicker.vue'
@@ -30,10 +31,17 @@ import type { WorkspaceCanvasEntry, WorkspaceInfo } from '@shared/api'
 import { desktopHost, workspaceApi } from './host'
 import { showDialog } from './dialog'
 import { nextCanvasName, type CanvasMutationResult, type SaveStatus } from './workspaceTypes'
-import { nestedCanvasesEnabled, setNestedCanvasesEnabled } from './workspacePrefs'
+import {
+  autoSaveDelayMs,
+  getAutoSaveMode,
+  nestedCanvasesEnabled,
+  setAutoSaveDelayMs,
+  setAutoSaveMode,
+  setNestedCanvasesEnabled,
+  type AutoSaveMode
+} from './workspacePrefs'
 
 const BLANK_SVG = serializeCanvas(emptyDoc())
-const AUTO_SAVE_DELAY = 700
 /** Windows/Linux 用自定义按钮;macOS 保留原生交通灯 */
 const showWindowControls =
   !!api.platform && api.platform !== 'darwin' && !!api.minimizeWindow && !!api.closeWindow
@@ -59,6 +67,10 @@ const activeRelPath = ref<string | null>(null)
 const sidebarCollapsed = ref(false)
 /** 仓库列表是否递归显示子目录里的画布(设置 → 布局) */
 const nestedCanvases = ref(nestedCanvasesEnabled())
+/** 自动保存间隔(秒),设置面板「编辑器 → 自动保存」可调 */
+const autoSaveDelaySec = ref(autoSaveDelayMs() / 1000)
+/** 自动保存模式:定时保存 / 关闭 */
+const autoSaveMode = ref<AutoSaveMode>(getAutoSaveMode())
 
 /** 全局菜单的 props/事件:状态栏内和选择页悬浮各用一份 */
 const globalMenuProps = computed(() => ({
@@ -71,7 +83,11 @@ const globalMenuProps = computed(() => ({
   canBack: view.value !== 'picker',
   gridVisible: runtime.value?.ui.gridVisible ?? null,
   snap: runtime.value?.ui.snap ?? null,
-  showNestedCanvases: nestedCanvases.value
+  showNestedCanvases: nestedCanvases.value,
+  autoSaveDelaySec: autoSaveDelaySec.value,
+  autoSaveMode: autoSaveMode.value,
+  // 仓库画布始终自动保存;临时画布(还没有路径)和落盘后的临时画布也显示这项设置
+  showAutoSave: !!workspace.value || autoSaveOn.value || (!!runtime.value && !currentPath.value)
 }))
 
 const globalMenuHandlers: Record<string, (...args: unknown[]) => void> = {
@@ -82,6 +98,24 @@ const globalMenuHandlers: Record<string, (...args: unknown[]) => void> = {
   'toggle-grid': () => toggleGridFromMenu(),
   'toggle-snap': () => toggleSnapFromMenu(),
   'toggle-nested-canvases': () => toggleNestedCanvases(),
+  'set-auto-save-delay': value => {
+    const seconds = Number(value)
+    if (!Number.isFinite(seconds)) return
+    setAutoSaveDelayMs(seconds * 1000)
+    autoSaveDelaySec.value = autoSaveDelayMs() / 1000
+    if (autoSaveMode.value === 'delay' && autoSaveOn.value && dirty.value) scheduleAutoSave()
+  },
+  'set-auto-save-mode': value => {
+    const mode: AutoSaveMode = value === 'off' ? 'off' : 'delay'
+    setAutoSaveMode(mode)
+    autoSaveMode.value = mode
+    if (mode === 'off') {
+      cancelAutoSave()
+      if (dirty.value) saveStatus.value = 'dirty'
+    } else if (autoSaveOn.value && dirty.value) {
+      scheduleAutoSave()
+    }
+  },
   'back-to-overview': () => backToPicker()
 }
 /** 只有用户主动「新建画布」时才展示模板卡片;打开已有画布/临时画布不弹 */
@@ -132,12 +166,12 @@ function cancelAutoSave(): void {
 }
 
 function scheduleAutoSave(): void {
-  if (!autoSaveOn.value) return
+  if (!autoSaveOn.value || autoSaveMode.value !== 'delay') return
   cancelAutoSave()
   autoSaveTimer = setTimeout(() => {
     autoSaveTimer = null
     void requestWorkspaceSave()
-  }, AUTO_SAVE_DELAY)
+  }, autoSaveDelayMs())
 }
 
 /** 把当前画布最新内容写回仓库;返回是否已经处于已保存状态 */
@@ -270,8 +304,8 @@ function mountDocument(
 async function canLeave(): Promise<boolean> {
   // 先把正在编辑的文字/拖拽收进文档,再判断脏标记
   runtime.value?.flush()
-  if (autoSaveOn.value && runtime.value) {
-    // 仓库画布先尝试落盘,失败才走「保存 / 不保存 / 取消」
+  if (autoSaveOn.value && autoSaveMode.value === 'delay' && runtime.value) {
+    // 自动保存开启时,有文件落点的画布先尝试落盘,失败才走「保存 / 不保存 / 取消」
     const saved = await requestWorkspaceSave()
     if (saved && !dirty.value) return true
   }
@@ -327,6 +361,8 @@ async function save(saveAs: boolean): Promise<boolean> {
   }
 
   if (busy) return false
+  // 临时画布第一次手动落盘后,后续编辑也自动写回这个文件
+  const wasTemporary = !currentPath.value
   busy = true
   try {
     rt.flush()
@@ -345,6 +381,7 @@ async function save(saveAs: boolean): Promise<boolean> {
     currentPath.value = target
     currentName.value = fileNameOf(target)
     rt.setPath(target, currentName.value)
+    if (wasTemporary) autoSaveOn.value = true
     dirty.value = rt.isDirty()
     saveStatus.value = dirty.value ? 'dirty' : 'idle'
     updateTitle()
@@ -694,7 +731,12 @@ async function reloadApp(): Promise<void> {
 async function handleWindowClose(): Promise<void> {
   if (closePromptOpen) return
   runtime.value?.flush()
-  if (autoSaveOn.value && runtime.value && flushWorkspaceSync()) {
+  if (
+    autoSaveOn.value &&
+    autoSaveMode.value === 'delay' &&
+    runtime.value &&
+    flushWorkspaceSync()
+  ) {
     allowUnload = true
     api.confirmClose?.(true)
     return
@@ -713,13 +755,20 @@ async function handleWindowClose(): Promise<void> {
       icon: 'warning',
       buttons: [
         { label: '取消', value: 'cancel' },
-        { label: '放弃修改并退出', value: 'discard', kind: 'danger' }
+        { label: '放弃修改并退出', value: 'discard', kind: 'danger' },
+        { label: '保存', value: 'save', kind: 'primary' }
       ],
       cancelValue: 'cancel'
     })
     if (choice === 'discard') {
       allowUnload = true
       api.confirmClose?.(true)
+    } else if (choice === 'save') {
+      const saved = await save(false)
+      if (saved) {
+        allowUnload = true
+        api.confirmClose?.(true)
+      }
     }
   } finally {
     closePromptOpen = false
@@ -758,13 +807,15 @@ function beforeUnload(e: BeforeUnloadEvent): void {
   runtime.value?.flush()
   if (!dirty.value) return
   // 自动保存的画布先同步落盘;成功就直接关闭,不弹「未保存」确认
-  if (autoSaveOn.value && flushWorkspaceSync()) return
+  if (autoSaveOn.value && autoSaveMode.value === 'delay' && flushWorkspaceSync()) return
   e.preventDefault()
   e.returnValue = ''
 }
 
 function onWindowBlur(): void {
-  if (autoSaveOn.value && dirty.value) void requestWorkspaceSave()
+  if (autoSaveOn.value && autoSaveMode.value === 'delay' && dirty.value) {
+    void requestWorkspaceSave()
+  }
 }
 
 function onWindowFocus(): void {
@@ -856,7 +907,7 @@ onBeforeUnmount(() => {
       <StatusBar
         :workspace-name="workspace?.name ?? null"
         :doc-name="runtime ? currentName : null"
-        :auto-save="!!workspace"
+        :auto-save="autoSaveOn && autoSaveMode === 'delay'"
         :has-path="!!currentPath"
         :read-only="runtime?.readOnly ?? false"
         :status="saveStatus"
@@ -867,12 +918,9 @@ onBeforeUnmount(() => {
       </StatusBar>
     </template>
 
-    <!-- 仓库选择页没有状态栏,齿轮仍然悬浮在左下角 -->
-    <GlobalMenu
-      v-if="view === 'picker'"
-      v-bind="globalMenuProps"
-      v-on="globalMenuHandlers"
-    />
+    <!-- 仓库选择页没有状态栏,左下角只保留深色/浅色主题切换;
+         设置入口在打开画布后的状态栏菜单里 -->
+    <ThemeToggle v-if="view === 'picker'" />
     <WindowControls v-if="showWindowControls" />
     <ThemedDialogHost />
 

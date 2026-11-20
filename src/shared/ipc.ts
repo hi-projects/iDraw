@@ -14,6 +14,7 @@ export const IPC = {
   WindowCloseRequested: 'window:close-requested',
   WindowCloseDecision: 'window:close-decision',
   TakePendingOpenFile: 'app:take-pending-open-file',
+  OpenExternal: 'app:open-external',
   MenuCommand: 'app:menu-command',
   OpenFile: 'app:open-file',
   WorkspacePickDirectory: 'workspace:pick-directory',

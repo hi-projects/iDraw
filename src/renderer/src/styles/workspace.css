@@ -39,8 +39,30 @@
     auto,
     24px 24px;
   background-repeat: no-repeat, repeat;
+  /* 缩略图卡片表面完全透明,只保留一圈渐变描边和投影,让页面点阵直接透出来 */
+  /* 渐变外边框:顶部接近白色,底部压暗 */
+  --thumb-edge: linear-gradient(180deg, #ffffff 0%, #f1f1f6 30%, var(--border-strong) 100%);
+  --thumb-elevation:
+    0 1px 2px rgba(20, 22, 35, 0.07),
+    0 8px 18px -12px rgba(20, 22, 35, 0.22),
+    0 18px 36px -26px rgba(20, 22, 35, 0.3);
   user-select: none;
   -webkit-app-region: drag;
+}
+
+:root[data-theme='dark'] .workspace-picker {
+  /* 深色下顶部高光更亮一档,底部压得更黑,边框才有金属般的双向明暗 */
+  --thumb-edge: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.24) 0%,
+    rgba(255, 255, 255, 0.09) 22%,
+    #34353e 58%,
+    rgba(0, 0, 0, 0.45) 100%
+  );
+  --thumb-elevation:
+    0 1px 1px rgba(0, 0, 0, 0.35),
+    0 6px 14px -8px rgba(0, 0, 0, 0.5),
+    0 20px 40px -20px rgba(0, 0, 0, 0.66);
 }
 
 /* 顶部只留应用图标(兼作窗口拖拽区),与下方内容共用同一条左边线 */
@@ -87,11 +109,11 @@
 .workspace-picker-body-inner {
   display: flex;
   flex-direction: column;
-  /* 占满窗口宽度而不是固定 1184px 居中:窗口放大后卡片仍从左边开始排,
-     与顶部 logo 共用同一条左边线(header 左右内边距 20px) */
+  /* 占满窗口宽度而不是固定 1184px 居中:窗口放大后卡片仍从左边开始排。
+     左右各留 32px,缩略图整体比顶部 logo 略向右收一点,不再贴着窗口左缘 */
   width: 100%;
   min-height: 100%;
-  padding: 20px 32px 26px 20px;
+  padding: 20px 32px 26px;
   box-sizing: border-box;
 }
 
@@ -110,32 +132,57 @@
      而出现「先涨后缩」的跳动。封面是 16/10 的 aspect-ratio,高度随宽度缩放,
      6 列在常见窗口高度下正好排下 3 行。 */
   grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 16px;
+  gap: 20px;
 }
 
 .workspace-recent-card {
-  border: 1px solid var(--border);
+  position: relative;
+  /* 卡片表面透明,不再铺任何底色,页面点阵可以直接透出来 */
+  border: none;
   border-radius: 14px;
-  background: var(--bg-toolbar);
-  box-shadow: 0 1px 2px rgba(20, 22, 35, 0.05);
-  overflow: hidden;
+  background: transparent;
+  box-shadow: var(--thumb-elevation);
   cursor: pointer;
   transition:
-    border-color 0.14s ease,
     box-shadow 0.14s ease,
     transform 0.1s ease;
 }
 
+/* 渐变描边单独画在伪元素上,用遮罩只留下 1px 外圈 */
+.workspace-recent-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  padding: 1px;
+  border-radius: inherit;
+  background: var(--thumb-edge);
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
 .workspace-recent-card:hover {
-  border-color: color-mix(in srgb, var(--brand) 45%, var(--border));
+  /* 悬停时整圈渐变边框换成品牌色,顶部偏亮、底部偏深,保持斜面感 */
+  --thumb-edge: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--brand) 76%, #ffffff) 0%,
+    color-mix(in srgb, var(--brand) 52%, var(--border)) 60%,
+    color-mix(in srgb, var(--brand) 34%, var(--border)) 100%
+  );
   box-shadow: var(--shadow-soft);
   transform: translateY(-2px);
 }
 
 .workspace-recent-card:focus-visible {
   outline: none;
-  border-color: var(--brand);
-  box-shadow: 0 0 0 3px var(--brand-soft);
+  --thumb-edge: linear-gradient(var(--brand), var(--brand));
+  box-shadow:
+    0 0 0 3px var(--brand-soft),
+    var(--thumb-elevation);
 }
 
 .workspace-recent-cover {
@@ -145,7 +192,10 @@
   aspect-ratio: 16 / 10;
   /* 缩略图之间的虚线分隔:浅色/深色主题下都能看清 */
   --preview-divider: color-mix(in srgb, var(--text-primary) 22%, transparent);
-  background: color-mix(in oklch, var(--bg-app) 70%, var(--border));
+  /* 画布部分也不铺底色,预览图和页面点阵直接叠在一起 */
+  background: transparent;
+  /* 卡片本身不再裁切内容,顶部圆角由封面自己处理 */
+  border-radius: 14px 14px 0 0;
   overflow: hidden;
 }
 
@@ -189,7 +239,7 @@
   min-width: 0;
   min-height: 0;
   padding: 8px;
-  background: #ffffff;
+  background: transparent;
   overflow: hidden;
 }
 
@@ -198,10 +248,6 @@
   height: 100%;
   object-fit: contain;
   pointer-events: none;
-}
-
-:root[data-theme='dark'] .workspace-recent-cell {
-  background-color: var(--bg-editor);
 }
 
 .workspace-recent-cell-empty {
@@ -218,18 +264,8 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  background:
-    radial-gradient(circle at 1px 1px, var(--canvas-dot) 1px, transparent 0) 0 0 / 20px 20px,
-    #ffffff;
   color: var(--text-tertiary);
   font-size: 11px;
-}
-
-:root[data-theme='dark'] .workspace-recent-cover-state {
-  background:
-    radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.08) 1px, transparent 0) 0 0 / 20px
-      20px,
-    var(--bg-editor);
 }
 
 .workspace-recent-remove {
@@ -267,22 +303,22 @@
   box-shadow: 0 0 0 3px var(--brand-soft);
 }
 
+/* 只显示名称,没有路径行,信息区更紧凑 */
 .workspace-recent-meta {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  grid-template-rows: auto auto;
-  column-gap: 8px;
-  row-gap: 2px;
+  display: flex;
   align-items: center;
-  padding: 10px 12px 11px;
+  gap: 8px;
+  padding: 7px 12px;
 }
 
 .workspace-recent-type {
-  grid-row: 1 / span 2;
+  flex: 0 0 auto;
   color: var(--text-tertiary);
 }
 
 .workspace-recent-name {
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 12.5px;
   font-weight: 600;
   color: var(--text-primary);
@@ -291,22 +327,18 @@
   text-overflow: ellipsis;
 }
 
-.workspace-recent-path {
-  font-size: 10.5px;
-  color: var(--text-tertiary);
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  direction: rtl;
-  text-align: left;
-}
-
 /* 最近打开区域直接铺在页面背景上,不再套一层白色卡片/虚线框 */
 /* 第一个缩略图位置:一个空白画布占位卡片 */
 /* 第一个缩略图位置:空白画布框 + 加号 */
 .workspace-recent-add-slot {
   display: flex;
   min-width: 0;
+  /* 有最近画布时高度交给网格行,与普通卡片同高,不再用固定 200px 撑出一截空白 */
+}
+
+/* 还没有最近画布时,加号框保留原来的整块尺寸 */
+.workspace-recent-add-slot:only-child,
+.workspace-recent-add-slot:only-child .workspace-recent-add-frame {
   min-height: 200px;
 }
 
@@ -316,24 +348,17 @@
   justify-content: center;
   flex: 1;
   width: 100%;
-  min-height: 200px;
-  border: 1.5px dashed rgba(20, 22, 35, 0.16);
+  border: 1.5px dashed rgba(20, 22, 35, 0.18);
   border-radius: 14px;
-  background-color: #ffffff;
-  background-image: radial-gradient(circle at 1px 1px, var(--canvas-dot) 1px, transparent 0);
-  background-size: 16px 16px;
+  /* 加号框也完全透明,只留虚线和投影,页面点阵直接穿透 */
+  background: transparent;
+  box-shadow: var(--thumb-elevation);
   /* 倒影只在空白缩略框内像水面一样延伸,超出框底就被裁掉 */
   overflow: hidden;
 }
 
 :root[data-theme='dark'] .workspace-recent-add-frame {
-  border-color: rgba(255, 255, 255, 0.14);
-  background-color: var(--bg-editor);
-  background-image: radial-gradient(
-    circle at 1px 1px,
-    rgba(255, 255, 255, 0.08) 1px,
-    transparent 0
-  );
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 .workspace-recent-add-anchor {

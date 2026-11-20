@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, screen } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, screen, shell } from 'electron'
 import type { MenuItemConstructorOptions } from 'electron'
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
@@ -295,6 +295,18 @@ function registerIpc(): void {
     const path = pendingOpenFile
     pendingOpenFile = null
     return path
+  })
+
+  // 应用矩阵里的 GitHub 链接:交给系统默认浏览器打开
+  ipcMain.handle(IPC.OpenExternal, async (_event, url: string): Promise<void> => {
+    try {
+      const target = new URL(url)
+      // 只放行 http(s),避免 file:// 之类链接借外部程序执行
+      if (target.protocol !== 'https:' && target.protocol !== 'http:') return
+      await shell.openExternal(target.toString())
+    } catch {
+      // 非法 URL 直接忽略
+    }
   })
 
   // 自定义标题栏只保留最小化与关闭(Windows/Linux)

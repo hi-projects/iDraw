@@ -17,7 +17,7 @@ import {
   X
 } from 'lucide-vue-next'
 import type { RecentEntry } from '@shared/api'
-import { dirNameOf, fileNameOf, joinPath } from '@shared/path'
+import { fileNameOf, joinPath } from '@shared/path'
 import { api } from '../../../host/windowApi'
 import { notifyError } from '../../../editor/notice'
 import { workspaceApi } from '../host'
@@ -42,7 +42,6 @@ interface RecentCard {
   kind: RecentEntry['kind']
   path: string
   name: string
-  subtitle: string
   previews: PreviewItem[]
   loading: boolean
   failed: boolean
@@ -87,7 +86,6 @@ function makeCard(entry: RecentEntry): RecentCard {
     kind: entry.kind,
     path: entry.path,
     name: basename(entry.path) || entry.path,
-    subtitle: entry.kind === 'workspace' ? entry.path : (dirNameOf(entry.path) ?? ''),
     previews: [],
     loading: true,
     failed: false
@@ -323,9 +321,6 @@ async function forget(card: RecentCard): Promise<void> {
               <FolderOpen v-if="card.kind === 'workspace'" :size="15" class="workspace-recent-type" />
               <FileImage v-else :size="15" class="workspace-recent-type" />
               <span class="workspace-recent-name">{{ card.name }}</span>
-              <span v-if="card.subtitle" class="workspace-recent-path" :title="card.path">
-                {{ card.subtitle }}
-              </span>
             </div>
           </div>
         </div>

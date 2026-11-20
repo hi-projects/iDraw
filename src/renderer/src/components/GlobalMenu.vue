@@ -11,6 +11,7 @@ import {
   Check,
   Cog,
   Download,
+  Github,
   Info,
   LayoutGrid,
   Palette,
@@ -22,7 +23,15 @@ import {
   X
 } from 'lucide-vue-next'
 import appIcon from '../../../../build/icon.png'
+import imarkIcon from '../../../../build/imark.svg'
+import { api } from '../../../host/windowApi'
+import { notifyError } from '../../../editor/notice'
 import { getThemePreference, setThemePreference, type ThemePreference } from '../theme'
+import {
+  MAX_AUTO_SAVE_DELAY_MS,
+  MIN_AUTO_SAVE_DELAY_MS,
+  type AutoSaveMode
+} from '../workspacePrefs'
 
 type SettingsSection = 'appearance' | 'editor' | 'layout' | 'about'
 
@@ -41,6 +50,12 @@ const props = defineProps<{
   snap: boolean | null
   /** 仓库列表是否递归显示子目录中的画布 */
   showNestedCanvases: boolean
+  /** 自动保存间隔(秒) */
+  autoSaveDelaySec: number
+  /** 自动保存模式:定时保存 / 关闭 */
+  autoSaveMode: AutoSaveMode
+  /** 是否展示自动保存模块(仓库模式,或临时画布手动保存后) */
+  showAutoSave: boolean
   /** 嵌在底部状态栏里(而非左下角悬浮) */
   inline?: boolean
 }>()
@@ -53,8 +68,48 @@ const emit = defineEmits<{
   (e: 'toggle-grid'): void
   (e: 'toggle-snap'): void
   (e: 'toggle-nested-canvases'): void
+  (e: 'set-auto-save-delay', seconds: number): void
+  (e: 'set-auto-save-mode', mode: AutoSaveMode): void
   (e: 'back-to-overview'): void
 }>()
+
+const autoSaveMinSec = MIN_AUTO_SAVE_DELAY_MS / 1000
+const autoSaveMaxSec = MAX_AUTO_SAVE_DELAY_MS / 1000
+/** 「定时保存」的常用档位,覆盖 1 秒到 1 分钟 */
+const AUTO_SAVE_PRESETS = [
+  { sec: 1, label: '1 秒' },
+  { sec: 5, label: '5 秒' },
+  { sec: 30, label: '30 秒' },
+  { sec: 60, label: '1 分钟' }
+]
+
+interface FamilyApp {
+  key: string
+  name: string
+  description: string
+  icon: string
+  /** 应用主页,点击卡片时用系统浏览器打开 */
+  url: string
+}
+
+/** 应用矩阵:目前只有 iMark,后续新增应用往数组里加一项即可 */
+const FAMILY_APPS: FamilyApp[] = [
+  {
+    key: 'imark',
+    name: 'iMark',
+    description: '专注文字创作，内容与版式即时呈现',
+    icon: imarkIcon,
+    url: 'https://github.com/hi-projects/iMark'
+  }
+]
+
+async function openAppPage(item: FamilyApp): Promise<void> {
+  try {
+    await api.openExternal?.(item.url)
+  } catch (err) {
+    notifyError('打开链接', err)
+  }
+}
 
 const menuOpen = ref(false)
 const settingsOpen = ref(false)
@@ -108,6 +163,27 @@ function chooseBackToOverview(): void {
 function chooseTheme(value: ThemePreference): void {
   theme.value = value
   setThemePreference(value)
+}
+
+function onAutoSaveDelayChange(event: Event): void {
+  const input = event.target as HTMLInputElement
+  const raw = Number(input.value)
+  if (!Number.isFinite(raw)) {
+    input.value = String(props.autoSaveDelaySec)
+    return
+  }
+  // 按整秒取整后再夹到允许区间,输入框里显示规范化后的值
+  const seconds = Math.round(Math.min(autoSaveMaxSec, Math.max(autoSaveMinSec, raw)))
+  input.value = String(seconds)
+  emit('set-auto-save-delay', seconds)
+}
+
+function chooseAutoSaveMode(mode: AutoSaveMode): void {
+  emit('set-auto-save-mode', mode)
+}
+
+function chooseAutoSavePreset(seconds: number): void {
+  emit('set-auto-save-delay', seconds)
 }
 
 function onKeydown(event: KeyboardEvent): void {
@@ -281,12 +357,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
           <div class="idraw-settings-content-body">
             <template v-if="activeSection === 'appearance'">
               <div class="idraw-settings-section">
-                <h3 class="idraw-settings-section-title">基础颜色</h3>
-                <p class="idraw-settings-section-desc">
-                  设置界面主题。选择后立即生效，并保存到本地设置。
-                </p>
+                <div class="idraw-settings-section-head">
+                  <h3 class="idraw-settings-section-title">基础颜色</h3>
+                  <p class="idraw-settings-section-desc">
+                    设置界面主题，选择后立即生效
+                  </p>
+                </div>
 
-                <div class="idraw-settings-themes">
+                <div class="idraw-settings-group idraw-settings-card-pad">
+                  <div class="idraw-settings-themes">
                   <button
                     class="idraw-theme-option"
                     :class="{ active: theme === 'system' }"
@@ -343,97 +422,225 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                       <Check :size="12" />
                     </span>
                   </button>
+                  </div>
                 </div>
-
-                <p class="idraw-settings-hint">主题会立即生效，并记住你的选择。</p>
               </div>
             </template>
 
             <template v-else-if="activeSection === 'editor'">
               <div class="idraw-settings-section">
-                <div class="idraw-settings-row">
-                  <div>
-                    <div class="idraw-settings-row-label">显示网格</div>
-                    <div class="idraw-settings-row-hint">在画布背景显示点阵网格。</div>
-                  </div>
-                  <button
-                    class="idraw-settings-switch"
-                    :class="{ on: gridVisible }"
-                    type="button"
-                    role="switch"
-                    :aria-checked="!!gridVisible"
-                    :disabled="gridVisible === null"
-                    @click="emit('toggle-grid')"
-                  >
-                    <span />
-                  </button>
+                <div class="idraw-settings-section-head">
+                  <h3 class="idraw-settings-section-title">网格</h3>
                 </div>
 
-                <div class="idraw-settings-row">
-                  <div>
-                    <div class="idraw-settings-row-label">网格吸附</div>
-                    <div class="idraw-settings-row-hint">拖动与创建形状时对齐到 20px 网格。</div>
+                <div class="idraw-settings-group">
+                  <div class="idraw-settings-row">
+                    <div>
+                      <div class="idraw-settings-row-label">显示网格</div>
+                      <div class="idraw-settings-row-hint">在画布背景中显示点阵网格</div>
+                    </div>
+                    <button
+                      class="idraw-settings-switch"
+                      :class="{ on: gridVisible }"
+                      type="button"
+                      role="switch"
+                      :aria-checked="!!gridVisible"
+                      :disabled="gridVisible === null"
+                      @click="emit('toggle-grid')"
+                    >
+                      <span />
+                    </button>
                   </div>
-                  <button
-                    class="idraw-settings-switch"
-                    :class="{ on: snap }"
-                    type="button"
-                    role="switch"
-                    :aria-checked="!!snap"
-                    :disabled="snap === null"
-                    @click="emit('toggle-snap')"
-                  >
-                    <span />
-                  </button>
+
+                  <div class="idraw-settings-row">
+                    <div>
+                      <div class="idraw-settings-row-label">网格吸附</div>
+                      <div class="idraw-settings-row-hint">操作自动对齐到网格</div>
+                    </div>
+                    <button
+                      class="idraw-settings-switch"
+                      :class="{ on: snap }"
+                      type="button"
+                      role="switch"
+                      :aria-checked="!!snap"
+                      :disabled="snap === null"
+                      @click="emit('toggle-snap')"
+                    >
+                      <span />
+                    </button>
+                  </div>
                 </div>
 
                 <p v-if="gridVisible === null" class="idraw-settings-hint">
                   打开一张画布后可以调整这些选项。
                 </p>
               </div>
+
+              <!-- 仓库画布始终支持自动保存;临时画布手动落盘后也开始支持,可在卡内关闭 -->
+              <div v-if="showAutoSave" class="idraw-settings-section" data-section="autosave">
+                <div class="idraw-settings-section-head">
+                  <h3 class="idraw-settings-section-title">自动保存</h3>
+                </div>
+
+                <div class="idraw-settings-group" role="radiogroup" aria-label="自动保存">
+                  <div
+                    class="idraw-autosave-mode"
+                    :class="{ active: autoSaveMode === 'delay' }"
+                  >
+                    <button
+                      class="idraw-autosave-pick"
+                      type="button"
+                      role="radio"
+                      :aria-checked="autoSaveMode === 'delay'"
+                      data-field="auto-save-mode-delay"
+                      @click="chooseAutoSaveMode('delay')"
+                    >
+                      <span class="idraw-autosave-radio" aria-hidden="true" />
+                      <span class="idraw-autosave-body">
+                        <span class="idraw-autosave-title">定时保存</span>
+                        <span class="idraw-autosave-desc">
+                          停止输入 {{ autoSaveDelaySec }} 秒后保存
+                        </span>
+                      </span>
+                    </button>
+
+                    <div v-if="autoSaveMode === 'delay'" class="idraw-autosave-delay">
+                      <span class="idraw-settings-presets">
+                        <button
+                          v-for="preset in AUTO_SAVE_PRESETS"
+                          :key="preset.sec"
+                          class="idraw-settings-preset"
+                          :class="{ active: autoSaveDelaySec === preset.sec }"
+                          type="button"
+                          @click="chooseAutoSavePreset(preset.sec)"
+                        >
+                          {{ preset.label }}
+                        </button>
+                      </span>
+                      <label class="idraw-settings-number">
+                        <input
+                          type="number"
+                          :min="autoSaveMinSec"
+                          :max="autoSaveMaxSec"
+                          step="1"
+                          :value="autoSaveDelaySec"
+                          data-field="auto-save-delay"
+                          aria-label="自动保存间隔(秒)"
+                          @change="onAutoSaveDelayChange"
+                        />
+                        <span>秒</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div
+                    class="idraw-autosave-mode"
+                    :class="{ active: autoSaveMode === 'off' }"
+                  >
+                    <button
+                      class="idraw-autosave-pick"
+                      type="button"
+                      role="radio"
+                      :aria-checked="autoSaveMode === 'off'"
+                      data-field="auto-save-mode-off"
+                      @click="chooseAutoSaveMode('off')"
+                    >
+                      <span class="idraw-autosave-radio" aria-hidden="true" />
+                      <span class="idraw-autosave-body">
+                        <span class="idraw-autosave-title">关闭</span>
+                        <span class="idraw-autosave-desc">手动保存（Ctrl+S）</span>
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              </div>
             </template>
 
             <template v-else-if="activeSection === 'layout'">
               <div class="idraw-settings-section">
-                <div class="idraw-settings-row">
-                  <div>
-                    <div class="idraw-settings-row-label">显示子目录中的 SVG</div>
-                    <div class="idraw-settings-row-hint">
-                      开启后,仓库左侧列表会递归显示所有子目录里的画布;默认只显示当前目录,避免打开大目录时混入回收站、扩展缓存里的文件。
+                <div class="idraw-settings-section-head">
+                  <h3 class="idraw-settings-section-title">画布列表</h3>
+                </div>
+
+                <div class="idraw-settings-group">
+                  <div class="idraw-settings-row">
+                    <div>
+                      <div class="idraw-settings-row-label">显示子目录中的 SVG</div>
+                      <div class="idraw-settings-row-hint">
+                        开启后,仓库左侧列表会递归显示所有子目录里的画布;默认只显示当前目录,避免打开大目录时混入回收站、扩展缓存里的文件。
+                      </div>
                     </div>
+                    <button
+                      class="idraw-settings-switch"
+                      :class="{ on: showNestedCanvases }"
+                      type="button"
+                      role="switch"
+                      data-field="show-nested-canvases"
+                      :aria-checked="showNestedCanvases"
+                      @click="emit('toggle-nested-canvases')"
+                    >
+                      <span />
+                    </button>
                   </div>
-                  <button
-                    class="idraw-settings-switch"
-                    :class="{ on: showNestedCanvases }"
-                    type="button"
-                    role="switch"
-                    data-field="show-nested-canvases"
-                    :aria-checked="showNestedCanvases"
-                    @click="emit('toggle-nested-canvases')"
-                  >
-                    <span />
-                  </button>
                 </div>
               </div>
             </template>
 
             <template v-else>
-              <div class="idraw-settings-about">
-                <img :src="appIcon" alt="" draggable="false" />
-                <div>
-                  <h3>iDraw</h3>
-                  <p>版本 0.1.0</p>
+              <!-- 第一部分:本应用 -->
+              <div class="idraw-settings-section">
+                <div class="idraw-settings-section-head">
+                  <h3 class="idraw-settings-section-title">本应用</h3>
+                </div>
+
+                <div class="idraw-settings-group idraw-settings-card-pad">
+                  <div class="idraw-settings-about">
+                    <img :src="appIcon" alt="" draggable="false" />
+                    <div>
+                      <h3>iDraw</h3>
+                      <p>版本 0.1.0</p>
+                    </div>
+                  </div>
+                  <p class="idraw-settings-about-desc">
+                    专注绘制流程图与示意图，作品可在各类软件中自由打开与继续编辑
+                  </p>
                 </div>
               </div>
-              <p class="idraw-settings-about-desc">
-                用标准 SVG 画流程图与示意图，文件可以直接在浏览器、Inkscape、Illustrator 中打开。
-              </p>
 
+              <!-- 第二部分:应用矩阵,后续新增应用往 FAMILY_APPS 里加一项即可 -->
               <div class="idraw-settings-section">
-                <h3 class="idraw-settings-section-title">文件格式</h3>
-                <p class="idraw-settings-section-desc">
-                  画布保存为 .svg 文件，文字和形状仍是可编辑的矢量元素。
-                </p>
+                <div class="idraw-settings-section-head">
+                  <h3 class="idraw-settings-section-title">应用矩阵</h3>
+                </div>
+
+                <div class="idraw-settings-group">
+                  <div
+                    v-for="item in FAMILY_APPS"
+                    :key="item.key"
+                    class="idraw-family-app"
+                    :data-app="item.key"
+                  >
+                    <img
+                      class="idraw-family-app-icon"
+                      :src="item.icon"
+                      :alt="item.name"
+                      draggable="false"
+                    />
+                    <div class="idraw-family-app-body">
+                      <div class="idraw-family-app-name">{{ item.name }}</div>
+                      <div class="idraw-family-app-desc">{{ item.description }}</div>
+                    </div>
+                    <button
+                      class="idraw-family-app-link"
+                      type="button"
+                      :title="`在 GitHub 上查看 ${item.name}`"
+                      :aria-label="`在 GitHub 上查看 ${item.name}`"
+                      @click="openAppPage(item)"
+                    >
+                      <Github :size="16" />
+                    </button>
+                  </div>
+                </div>
               </div>
             </template>
           </div>

@@ -11,6 +11,7 @@
   "activationEvents": [
     "onCommand:idraw.canvas.open",
     "onCommand:idraw.canvas.new",
+    "onCommand:idraw.canvas.insert",
     "onCommand:idraw.canvas.save",
     "onCommand:idraw.canvas.saveAs",
     "onCommand:idraw.canvas.exportPng",
@@ -36,6 +37,12 @@
         "detail": "输入画布名称，创建仓库里的 SVG 并打开"
       },
       {
+        "command": "idraw.canvas.insert",
+        "title": "插入画布",
+        "category": "iDraw",
+        "detail": "在光标所在行新建画布，并把画布内容作为图片插入这里"
+      },
+      {
         "command": "idraw.canvas.save",
         "title": "保存画布",
         "category": "iDraw"
@@ -59,6 +66,13 @@
         "command": "idraw.canvas.redo",
         "title": "重做画布操作",
         "category": "iDraw"
+      }
+    ],
+    "imark.lineMenu": [
+      {
+        "id": "canvas",
+        "label": "画布",
+        "command": "idraw.canvas.insert"
       }
     ]
   }

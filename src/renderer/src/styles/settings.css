@@ -304,26 +304,30 @@
   padding: 20px 26px 28px;
 }
 
-.idraw-settings-section {
-  margin-bottom: 26px;
+/* 模块之间用一条横线分隔,与 iMark / Obsidian 的设置页一致 */
+.idraw-settings-section + .idraw-settings-section {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
 }
 
-.idraw-settings-section:last-child {
-  margin-bottom: 0;
+/* 模块标题在卡片之外,先说明这一组是什么,再引出下面的卡片 */
+.idraw-settings-section-head {
+  padding: 4px 2px 12px;
 }
 
 .idraw-settings-section-title {
-  margin: 0 0 4px;
-  font-size: 13.5px;
-  font-weight: 600;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
   color: var(--text-primary);
 }
 
 .idraw-settings-section-desc {
-  margin: 0 0 14px;
+  margin: 4px 0 0;
   font-size: 12px;
-  line-height: 1.55;
-  color: var(--text-secondary);
+  line-height: 1.6;
+  color: var(--text-tertiary);
 }
 
 .idraw-settings-themes {
@@ -456,6 +460,28 @@
   color: var(--text-tertiary);
 }
 
+/* 模块卡片:仿 Obsidian/iMark —— 不画描边,靠略深/略浅的底色区分;
+   卡内同一组的行之间用细线分隔 */
+.idraw-settings-group {
+  border: 0;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--text-primary) 4%, var(--bg-editor));
+  overflow: hidden;
+}
+
+.idraw-settings-group .idraw-settings-row {
+  padding: 12px 14px;
+}
+
+.idraw-settings-group .idraw-settings-row + .idraw-settings-row {
+  border-top: 1px solid var(--border);
+}
+
+/* 卡片内的整块内容(如主题预览) */
+.idraw-settings-card-pad {
+  padding: 14px;
+}
+
 .idraw-settings-row {
   display: flex;
   align-items: center;
@@ -474,6 +500,135 @@
   margin-top: 3px;
   font-size: 11px;
   color: var(--text-tertiary);
+}
+
+/* 设置面板里的数字输入(如自动保存间隔) */
+.idraw-settings-number {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.idraw-settings-number input {
+  width: 68px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-editor);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
+.idraw-settings-number input:focus {
+  border-color: var(--accent);
+}
+
+/* ---------- 自动保存:定时保存 / 关闭 ---------- */
+
+/* 与 iMark 的自动保存设置一致:单选行,选中的档位在下面展开延迟控制 */
+.idraw-autosave-mode + .idraw-autosave-mode {
+  border-top: 1px solid var(--border);
+}
+
+.idraw-autosave-pick {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.idraw-autosave-pick:hover {
+  background: var(--bg-toolbar-btn-hover);
+}
+
+.idraw-autosave-radio {
+  position: relative;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
+  margin-top: 2px;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+}
+
+.idraw-autosave-mode.active .idraw-autosave-radio {
+  border-color: var(--accent);
+}
+
+.idraw-autosave-mode.active .idraw-autosave-radio::after {
+  content: '';
+  position: absolute;
+  inset: 2.5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.idraw-autosave-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.idraw-autosave-title {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.idraw-autosave-desc {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-tertiary);
+}
+
+.idraw-autosave-delay {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px 13px 40px;
+}
+
+.idraw-settings-presets {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.idraw-settings-preset {
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.idraw-settings-preset:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
+.idraw-settings-preset.active,
+.idraw-settings-preset.active:hover {
+  border-color: var(--accent);
+  color: var(--active-text);
+  background: var(--bg-active);
 }
 
 .idraw-settings-switch {
@@ -553,8 +708,80 @@
 }
 
 .idraw-settings-about-desc {
-  margin: 0 0 24px;
+  margin: 0;
   font-size: 12.5px;
   line-height: 1.6;
   color: var(--text-secondary);
+}
+
+/* 应用矩阵:一个应用一行;只有右侧 GitHub 图标可以点击 */
+.idraw-family-app {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+.idraw-family-app + .idraw-family-app {
+  border-top: 1px solid var(--border);
+}
+
+/* 右侧 GitHub 按钮:悬停或聚焦时才点亮,并出现「在 GitHub 上查看」提示 */
+.idraw-family-app-link {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition:
+    color 0.14s ease,
+    background-color 0.14s ease,
+    transform 0.14s ease;
+}
+
+.idraw-family-app-link:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+  transform: translateY(-1px);
+}
+
+.idraw-family-app-link:focus-visible {
+  outline: none;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.idraw-family-app-icon {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  object-fit: cover;
+  box-shadow: var(--shadow-soft);
+}
+
+.idraw-family-app-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.idraw-family-app-name {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.idraw-family-app-desc {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-tertiary);
 }

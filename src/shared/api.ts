@@ -126,6 +126,8 @@ export interface WindowApi {
   confirmDiscard(fileName: string): Promise<DiscardChoice>
   /** 拖入窗口的文件 → 绝对路径(Electron 44 的 webUtils) */
   getPathForFile(file: File): string
+  /** 只由独立应用提供:用系统默认浏览器打开 http(s) 链接 */
+  openExternal?(url: string): Promise<void>
   /**
    * 只由独立应用 preload 提供:运行平台。
    * Windows/Linux 用渲染层画的自定义窗口按钮,macOS 保留原生标题栏。

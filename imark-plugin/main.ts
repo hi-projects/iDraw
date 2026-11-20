@@ -25,6 +25,7 @@ const VIEW_TYPE = 'idraw.canvas'
 
 const CMD_OPEN = 'idraw.canvas.open'
 const CMD_NEW = 'idraw.canvas.new'
+const CMD_INSERT = 'idraw.canvas.insert'
 const CMD_SAVE = 'idraw.canvas.save'
 const CMD_SAVE_AS = 'idraw.canvas.saveAs'
 const CMD_EXPORT_PNG = 'idraw.canvas.exportPng'
@@ -99,6 +100,7 @@ export class CanvasPlugin {
     this.context.subscriptions.push(
       imark.commands.registerCommand(CMD_OPEN, () => this.openCommand()),
       imark.commands.registerCommand(CMD_NEW, () => this.newCommand()),
+      imark.commands.registerCommand(CMD_INSERT, (args?: unknown) => this.insertCommand(args)),
       imark.commands.registerCommand(CMD_SAVE, () => this.sendMenu('file:save')),
       imark.commands.registerCommand(CMD_SAVE_AS, () => this.sendMenu('file:save-as')),
       imark.commands.registerCommand(CMD_EXPORT_PNG, () => this.sendMenu('file:export-png')),
@@ -139,6 +141,73 @@ export class CanvasPlugin {
     const panel = this.ensurePanel()
     panel.title = basename(path)
     await panel.webview.postMessage({ type: HOST_NEW, path })
+  }
+
+  /**
+   * 行首「+」→「画布」:在点「+」的那一行建画布,并把画布图像插在这里。
+   *
+   * 插入完成前不能打开面板 —— 画布标签一激活,活动编辑器就换成面板了。
+   * 空白骨架仍由 webview 写(与「新建画布」同一条路径),插件宿主不碰画布格式。
+   */
+  private async insertCommand(rawArgs: unknown): Promise<void> {
+    const args = asRecord(rawArgs)
+    const editor = imark.window.activeTextEditor
+    if (!editor) {
+      await imark.window.showWarningMessage('请先把光标放到 Markdown 文档里，再插入画布。')
+      return
+    }
+    // 图片链接按文档位置写相对路径;文档还没落盘就没有可用的基准目录
+    const docPath = str(args.filePath) || editor.document.fileName
+    if (!isAbsolute(docPath)) {
+      await imark.window.showWarningMessage('请先保存文档，再把画布插图进来。')
+      return
+    }
+    const path = await this.askNewPath()
+    if (!path) return
+
+    const doc = editor.document
+    const requested = typeof args.line === 'number' ? args.line : editor.selection.active.line + 1
+    const lineIndex = Math.min(Math.max(Math.trunc(requested) - 1, 0), doc.lineCount - 1)
+    const line = doc.lineAt(lineIndex)
+    const image = this.imageMarkdown(docPath, path)
+
+    // 空行直接占用这一行;有内容时另起一段 —— 图片是行内元素,紧贴上一行
+    // 会并进同一段。上一行已经是空行(或段内硬换行)时不再多补一条。
+    const prev = line.lineNumber > 0 ? doc.lineAt(line.lineNumber - 1) : null
+    const prevBlank = prev === null || prev.text.trim().length === 0
+    const prevHardBreak = prev !== null && /(?: {2,}|\\)$/.test(prev.text)
+    const lead =
+      line.text.trim().length === 0 ? (prevBlank || prevHardBreak ? '' : '\n') : '\n\n'
+    const next = line.lineNumber + 1 < doc.lineCount ? doc.lineAt(line.lineNumber + 1) : null
+    const tail = next && next.text === '' ? '' : '\n'
+    const insert = `${lead}${image}${tail}`
+
+    const atOffset = doc.offsetAt(line.range.end)
+    const ok = await editor.edit(edit => {
+      edit.insert(doc.positionAt(atOffset), insert)
+    })
+    if (!ok) {
+      await imark.window.showErrorMessage('插入画布失败：文档拒绝修改')
+      return
+    }
+    // 光标落在图片后的空格上:贴着 Image 节点末尾时光标会把源码显形
+    const cursor = doc.positionAt(atOffset + lead.length + image.length)
+    editor.setSelection(cursor)
+    editor.revealRange(
+      new imark.Range(cursor, cursor),
+      imark.TextEditorRevealType.InCenterIfOutsideViewport
+    )
+
+    const panel = this.ensurePanel()
+    panel.title = basename(path)
+    await panel.webview.postMessage({ type: HOST_NEW, path })
+  }
+
+  /** 图片链接按文档位置写相对路径;目标里有空白/括号时用尖括号包住 */
+  private imageMarkdown(docPath: string, canvasPath: string): string {
+    const rel = relative(dirname(docPath), canvasPath).split(/[\\/]/).join('/')
+    const dest = /[\s()]/.test(rel) ? `<${rel}>` : rel
+    return `![画布](${dest}) `
   }
 
   private sendMenu(command: MenuCommand): void {

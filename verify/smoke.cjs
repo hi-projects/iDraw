@@ -962,6 +962,44 @@ async function main() {
   await js(wc, "document.querySelector('.idraw-corner-btn').click()")
   await js(wc, "document.querySelector('[data-action=open-settings]').click()")
   check('设置里有布局分区', await waitFor(wc, "!!document.querySelector('[data-section=layout]')"))
+  await js(wc, "document.querySelectorAll('.idraw-settings-nav-item')[1].click()")
+  check(
+    '仓库模式下有自动保存模块',
+    await waitFor(wc, "!!document.querySelector('[data-section=autosave]')")
+  )
+  check(
+    '自动保存模块有间隔输入',
+    await js(wc, "!!document.querySelector('[data-field=auto-save-delay]')")
+  )
+  check(
+    '自动保存可关闭',
+    await waitFor(wc, "!!document.querySelector('[data-field=auto-save-mode-off]')")
+  )
+  await js(wc, "document.querySelector('[data-field=auto-save-mode-off]').click()")
+  check(
+    '关闭后隐藏间隔设置',
+    await waitFor(wc, "!document.querySelector('[data-field=auto-save-delay]')")
+  )
+  check(
+    '自动保存模式已持久化',
+    (await js(wc, "localStorage.getItem('idraw-autosave-mode')")) === 'off'
+  )
+  await js(wc, "document.querySelector('[data-field=auto-save-mode-delay]').click()")
+  check(
+    '重新开启后显示间隔设置',
+    await waitFor(wc, "!!document.querySelector('[data-field=auto-save-delay]')")
+  )
+  check(
+    '自动保存模式恢复为定时',
+    (await js(wc, "localStorage.getItem('idraw-autosave-mode')")) === 'delay'
+  )
+  check(
+    '编辑器设置按网格/自动保存分组',
+    await js(
+      wc,
+      "document.querySelectorAll('.idraw-settings-group').length === 2 && [...document.querySelectorAll('.idraw-settings-section-title')].map(el => el.textContent.trim()).join(',') === '网格,自动保存'"
+    )
+  )
   await js(wc, "document.querySelector('[data-section=layout]').click()")
   check(
     '布局里有子目录开关',
@@ -1147,14 +1185,38 @@ async function main() {
     /* 无头环境偶尔截不到,不影响断言 */
   }
 
-  console.log('[12] 状态栏菜单与主题切换')
+  console.log('[12] 选择页主题切换')
   check(
     '旧设置浮标已移除',
     await js(wc, "!document.querySelector('.idraw-fab')")
   )
-  check('全局菜单按钮存在', await js(wc, "!!document.querySelector('.idraw-corner-btn')"))
-  await js(wc, "document.querySelector('.idraw-corner-btn').click()")
-  check('全局菜单出现', await waitFor(wc, "!!document.querySelector('.idraw-corner-menu')"))
+  check(
+    '选择页左下角是主题切换按钮',
+    await js(wc, "!!document.querySelector('[data-action=toggle-theme]')")
+  )
+  const themeBefore = await js(wc, "document.documentElement.dataset.theme")
+  const themeAfter = themeBefore === 'dark' ? 'light' : 'dark'
+  await js(wc, "document.querySelector('[data-action=toggle-theme]').click()")
+  check(
+    '主题切换立即生效',
+    await waitFor(wc, `document.documentElement.dataset.theme === '${themeAfter}'`)
+  )
+  check(
+    '主题偏好已写入 localStorage',
+    (await js(wc, "localStorage.getItem('idraw-theme')")) === themeAfter
+  )
+  await js(wc, "document.querySelector('[data-action=toggle-theme]').click()")
+  check(
+    '再次点击切回原主题',
+    await waitFor(wc, `document.documentElement.dataset.theme === '${themeBefore}'`)
+  )
+
+  console.log('[13] 状态栏菜单、设置与返回画布总览')
+  await js(wc, "document.querySelector('.workspace-recent-add-button').click()")
+  await js(wc, "document.querySelector('[data-action=temporary-canvas]').click()")
+  check('临时画布已打开', await waitFor(wc, "!!document.querySelector('.canvas-surface')"))
+  await js(wc, "document.querySelector('.idraw-statusbar .idraw-corner-btn').click()")
+  check('状态栏全局菜单出现', await waitFor(wc, "!!document.querySelector('.idraw-corner-menu')"))
   await js(wc, "document.querySelector('[data-action=open-settings]').click()")
   check(
     '设置弹窗出现',
@@ -1189,22 +1251,25 @@ async function main() {
     await js(wc, "document.querySelectorAll('.idraw-settings-switch').length === 2")
   )
   check(
-    '编辑器设置不再显示画布标题',
-    await js(wc, "!document.querySelector('.idraw-settings-section-title')")
-  )
-  check(
-    '编辑器开关之间没有分割线',
+    '临时画布也显示网格与自动保存两组',
     await js(
       wc,
-      "getComputedStyle(document.querySelector('.idraw-settings-row')).borderBottomWidth === '0px'"
+      "document.querySelectorAll('.idraw-settings-group').length === 2 && [...document.querySelectorAll('.idraw-settings-section-title')].map(el => el.textContent.trim()).join(',') === '网格,自动保存'"
+    )
+  )
+  check(
+    '临时画布可设置自动保存间隔',
+    await js(wc, "!!document.querySelector('[data-field=auto-save-delay]')")
+  )
+  check(
+    '分组卡片内的行之间有分隔线',
+    await js(
+      wc,
+      "getComputedStyle(document.querySelectorAll('.idraw-settings-row')[1]).borderTopWidth === '1px'"
     )
   )
 
-  console.log('[13] 从全局菜单返回画布总览')
   await js(wc, "document.querySelector('.idraw-settings-close').click()")
-  await js(wc, "document.querySelector('.workspace-recent-add-button').click()")
-  await js(wc, "document.querySelector('[data-action=temporary-canvas]').click()")
-  check('临时画布已打开', await waitFor(wc, "!!document.querySelector('.canvas-surface')"))
   check(
     '临时画布状态栏有返回总览图标',
     await js(wc, "!!document.querySelector('.idraw-statusbar [data-action=back-overview]')")

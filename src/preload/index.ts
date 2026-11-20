@@ -71,6 +71,7 @@ const api: WindowApi = {
   writeFileBytes: (path: string, data: Uint8Array) => request<void>(IPC.FileWriteBytes, { path, data }),
   confirmDiscard: (fileName: string) => request<DiscardChoice>(IPC.ConfirmDiscard, { fileName }),
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
+  openExternal: (url: string) => request<void>(IPC.OpenExternal, url),
   platform: process.platform,
   minimizeWindow: () => ipcRenderer.send(IPC.WindowMinimize),
   closeWindow: () => ipcRenderer.send(IPC.WindowClose),

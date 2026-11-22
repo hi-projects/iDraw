@@ -63,6 +63,11 @@ function basename(path: string): string {
   return fileNameOf(path) || path
 }
 
+/** 中文/CJK 字形在同字号下视觉偏大,缩略图标签里略微收一点 */
+function hasCjk(text: string): boolean {
+  return /[㐀-鿿豈-﫿]/.test(text)
+}
+
 function svgDataUrl(text: string): string | null {
   if (!text || text.length > MAX_PREVIEW_TEXT) return null
   // 预览去掉文件自带的白色页面,露出单元格背景,让缩略图跟随主题变深
@@ -238,7 +243,7 @@ async function forget(card: RecentCard): Promise<void> {
                     @click="chooseTemporary"
                   >
                     <Sparkles :size="26" class="workspace-recent-empty-menu-icon" />
-                    <span>临时画布</span>
+                    <span>新建画布</span>
                   </button>
                   <button
                     class="workspace-recent-empty-menu-item"
@@ -320,7 +325,9 @@ async function forget(card: RecentCard): Promise<void> {
             <div class="workspace-recent-meta">
               <FolderOpen v-if="card.kind === 'workspace'" :size="15" class="workspace-recent-type" />
               <FileImage v-else :size="15" class="workspace-recent-type" />
-              <span class="workspace-recent-name">{{ card.name }}</span>
+              <span class="workspace-recent-name" :class="{ 'is-cjk': hasCjk(card.name) }">
+                {{ card.name }}
+              </span>
             </div>
           </div>
         </div>

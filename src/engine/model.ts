@@ -57,8 +57,18 @@ export interface CanvasNode {
   style: NodeStyle
 }
 
-/** 连接点:auto = 打开时继续按两端位置挑边 */
-export type AnchorSide = 'auto' | 'n' | 'e' | 's' | 'w'
+/**
+ * 连线的挂接方式。
+ *
+ * - `auto`:每次按两端位置自动挑一条边;
+ * - `n`/`e`/`s`/`w`:固定在该侧边中点;
+ * - `free`:端点在任意位置 —— 绑定节点时 `x`/`y` 是相对节点宽高的比例(0–1),
+ *   未绑定节点时是画布上的世界坐标。
+ */
+export type AnchorSide = 'auto' | 'n' | 'e' | 's' | 'w' | 'free'
+
+/** 几何计算里实际用到的一侧(orthogonal/curve 路由的方向) */
+export type EdgeSide = 'n' | 'e' | 's' | 'w'
 
 export type EdgeRouting = 'straight' | 'orthogonal' | 'curve'
 export type ArrowMode = 'none' | 'start' | 'end' | 'both'
@@ -69,6 +79,7 @@ export interface EdgeEnd {
   /** 节点 id;null = 自由端点(坐标在 x/y) */
   node: string | null
   anchor: AnchorSide
+  /** anchor=free 且有节点时是相对比例(0–1);否则是自由端点的世界坐标 */
   x: number
   y: number
 }
@@ -94,6 +105,10 @@ export interface CanvasEdge {
   /** 箭头大小(在描边宽度之上的倍数,默认 9) */
   arrowSize: number
   label: string
+  /** 标签在路径上的位置比例(0=起点,1=终点);缺省 0.5,即路径中点 */
+  labelPos?: number
+  /** 手动路由的折点(世界坐标);存在时不再自动布线 */
+  waypoints?: Array<{ x: number; y: number }>
   style: EdgeStyle
 }
 
@@ -184,7 +199,7 @@ export const DARK_NODE_DEFAULTS: NodeStyle = {
 export const DARK_EDGE_DEFAULTS: EdgeStyle = {
   ...EDGE_DEFAULTS,
   stroke: '#8f94a3',
-  color: '#a6a7b3'
+  color: '#ffffff'
 }
 
 function isDarkTheme(): boolean {

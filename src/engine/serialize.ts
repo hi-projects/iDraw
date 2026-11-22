@@ -21,10 +21,17 @@ import {
   PAGE_WIDTH,
   PAGE_HEIGHT,
   defaultEdgeStyle,
+  newEdgeStyle,
   defaultNodeStyle,
   emptyDoc
 } from './model'
-import { computedViewBox, edgeGeometry } from './geometry'
+import {
+  computedViewBox,
+  edgeGeometry,
+  edgeLabelPoint,
+  edgeLabelPos,
+  fitViewBox
+} from './geometry'
 import { layoutNodeText, shapeParts, textAttrs } from './shapes'
 import { fontFamily, fontOf, lineHeightOf, wrapText } from './textMetrics'
 
@@ -47,6 +54,15 @@ function escAttrText(value: string): string {
 
 function num(n: number): string {
   return String(Math.round(n * 100) / 100)
+}
+
+/** free 端点的相对比例:两位小数会在宽形状上跳动,用四位 */
+function num4(n: number): string {
+  return String(Math.round(n * 10000) / 10000)
+}
+
+function endCoord(value: number, bound: boolean): string {
+  return bound ? num4(value) : num(value)
 }
 
 /** 文本节点内容转义(保留换行;换行由 tspan 拆分) */
@@ -126,11 +142,30 @@ function edgeMarkup(edge: CanvasEdge, doc: CanvasDoc): string {
     `data-idraw-to-node="${edge.to.node ? esc(edge.to.node) : ''}"`,
     `data-idraw-to-anchor="${edge.to.anchor}"`
   ]
-  if (!edge.from.node) {
-    attrs.push(`data-idraw-from-x="${num(edge.from.x)}"`, `data-idraw-from-y="${num(edge.from.y)}"`)
+  // free 端点需要坐标:绑定时是相对节点的比例,自由端点是世界坐标
+  if (!edge.from.node || edge.from.anchor === 'free') {
+    attrs.push(
+      `data-idraw-from-x="${endCoord(edge.from.x, !!edge.from.node)}"`,
+      `data-idraw-from-y="${endCoord(edge.from.y, !!edge.from.node)}"`
+    )
   }
-  if (!edge.to.node) {
-    attrs.push(`data-idraw-to-x="${num(edge.to.x)}"`, `data-idraw-to-y="${num(edge.to.y)}"`)
+  if (!edge.to.node || edge.to.anchor === 'free') {
+    attrs.push(
+      `data-idraw-to-x="${endCoord(edge.to.x, !!edge.to.node)}"`,
+      `data-idraw-to-y="${endCoord(edge.to.y, !!edge.to.node)}"`
+    )
+  }
+  const labelPos = edgeLabelPos(edge)
+  if (Math.abs(labelPos - 0.5) > 1e-6) {
+    attrs.push(`data-idraw-label-pos="${num(labelPos)}"`)
+  }
+  const waypoints = (edge.waypoints ?? []).filter(
+    p => Number.isFinite(p.x) && Number.isFinite(p.y)
+  )
+  if (waypoints.length > 0) {
+    attrs.push(
+      `data-idraw-waypoints="${waypoints.map(p => `${num(p.x)},${num(p.y)}`).join(' ')}"`
+    )
   }
   attrs.push(
     `data-idraw-routing="${edge.routing}"`,
@@ -155,16 +190,17 @@ function edgeMarkup(edge: CanvasEdge, doc: CanvasDoc): string {
 
   let label = ''
   if (edge.label) {
+    const at = edgeLabelPoint(edge, doc)
     const lines = edge.label.split('\n')
     const lh = lineHeightOf(edge.style.fontSize)
-    // 与编辑器渲染保持一致:文字块中心对齐连线中点
+    // 与编辑器渲染保持一致:文字块中心对齐标签锚点
     const baseline = edge.style.fontSize * 0.35 - ((lines.length - 1) * lh) / 2
-    const startY = g.mid.y + baseline
+    const startY = at.y + baseline
     const tspans = lines
-      .map((line, i) => `<tspan x="${num(g.mid.x)}" y="${num(startY + i * lh)}">${escText(line)}</tspan>`)
+      .map((line, i) => `<tspan x="${num(at.x)}" y="${num(startY + i * lh)}">${escText(line)}</tspan>`)
       .join('')
     label = `
-      <text data-idraw-edge-label="${esc(edge.id)}" data-idraw-label="${escAttrText(edge.label)}" x="${num(g.mid.x)}" y="${num(startY)}" text-anchor="middle" font-family="${esc(fontFamily())}" font-size="${num(edge.style.fontSize)}" font-weight="${edge.style.bold ? 600 : 400}" font-style="${edge.style.italic ? 'italic' : 'normal'}" fill="${esc(edge.style.color)}" stroke="#ffffff" stroke-width="4" paint-order="stroke" stroke-linejoin="round">${tspans}</text>`
+      <text data-idraw-edge-label="${esc(edge.id)}" data-idraw-label="${escAttrText(edge.label)}" x="${num(at.x)}" y="${num(startY)}" text-anchor="middle" font-family="${esc(fontFamily())}" font-size="${num(edge.style.fontSize)}" font-weight="${edge.style.bold ? 600 : 400}" font-style="${edge.style.italic ? 'italic' : 'normal'}" fill="${esc(edge.style.color)}" stroke="#ffffff" stroke-width="4" paint-order="stroke" stroke-linejoin="round">${tspans}</text>`
   }
   return `    <path ${attrs.join(' ')}/>${label}`
 }
@@ -172,6 +208,7 @@ function edgeMarkup(edge: CanvasEdge, doc: CanvasDoc): string {
 /** 场景 → SVG 文本 */
 export function serializeCanvas(doc: CanvasDoc): string {
   const vb = computedViewBox(doc)
+  const fit = fitViewBox(doc)
   const markers = new Map<string, { stroke: string; hollow: boolean; size: number }>()
   for (const e of doc.edges) {
     if (e.arrow === 'none') continue
@@ -189,7 +226,7 @@ export function serializeCanvas(doc: CanvasDoc): string {
   const nodes = doc.nodes.map(n => nodeMarkup(n)).join('\n')
 
   return `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="${SVG_NS}" width="${num(vb.w)}" height="${num(vb.h)}" viewBox="${num(vb.x)} ${num(vb.y)} ${num(vb.w)} ${num(vb.h)}" data-idraw-canvas="1" data-idraw-version="${CANVAS_VERSION}">
+<svg xmlns="${SVG_NS}" width="${num(vb.w)}" height="${num(vb.h)}" viewBox="${num(vb.x)} ${num(vb.y)} ${num(vb.w)} ${num(vb.h)}" data-idraw-canvas="1" data-idraw-version="${CANVAS_VERSION}" data-idraw-fit="${num(fit.x)} ${num(fit.y)} ${num(fit.w)} ${num(fit.h)}">
   <defs>
     ${defs}
   </defs>
@@ -229,7 +266,7 @@ const SHAPES: ReadonlySet<string> = new Set<ShapeKind>([
   'plus',
   'text'
 ])
-const ANCHORS: ReadonlySet<string> = new Set<AnchorSide>(['auto', 'n', 'e', 's', 'w'])
+const ANCHORS: ReadonlySet<string> = new Set<AnchorSide>(['auto', 'n', 'e', 's', 'w', 'free'])
 const ROUTINGS: ReadonlySet<string> = new Set<EdgeRouting>(['straight', 'orthogonal', 'curve'])
 const ARROWS: ReadonlySet<string> = new Set<ArrowMode>(['none', 'start', 'end', 'both'])
 
@@ -351,6 +388,16 @@ function parseEdge(el: Element, label: string, labelEl: Element | null): CanvasE
   const routingRaw = attr(el, 'data-idraw-routing')
   const arrowRaw = attr(el, 'data-idraw-arrow')
   const base = defaultEdgeStyle()
+  const labelPosRaw = el.getAttribute('data-idraw-label-pos')
+  const labelPosNum = labelPosRaw === null ? NaN : Number(labelPosRaw)
+  const waypointsRaw = attr(el, 'data-idraw-waypoints').trim()
+  const waypoints = waypointsRaw
+    ? waypointsRaw
+        .split(/\s+/)
+        .map(part => part.split(',').map(Number))
+        .filter(pair => pair.length === 2 && pair.every(n => Number.isFinite(n)))
+        .map(pair => ({ x: pair[0]!, y: pair[1]! }))
+    : []
   return {
     id: attr(el, 'data-idraw-edge'),
     from: readEnd(el, 'from'),
@@ -360,13 +407,19 @@ function parseEdge(el: Element, label: string, labelEl: Element | null): CanvasE
     arrowStyle: attr(el, 'data-idraw-arrow-style') === 'hollow' ? 'hollow' : 'solid',
     arrowSize: Math.min(20, Math.max(2, fnum(el.getAttribute('data-idraw-arrow-size'), 9))),
     label,
+    labelPos: Number.isFinite(labelPosNum) ? Math.min(1, Math.max(0, labelPosNum)) : undefined,
+    waypoints: waypoints.length > 0 ? waypoints : undefined,
     style: {
       ...base,
       stroke: strAttr(el, 'stroke', base.stroke),
       strokeWidth: fnum(el.getAttribute('stroke-width'), base.strokeWidth),
       dash: !!strAttr(el, 'stroke-dasharray', ''),
       fontSize: fnum(labelEl?.getAttribute('font-size') ?? null, base.fontSize),
-      color: strAttr(labelEl, 'fill', base.color),
+      // 旧文件的默认灰色标签跟随新的主题默认(深色下为白色)
+      color: (() => {
+        const raw = strAttr(labelEl, 'fill', base.color)
+        return raw === '#4b5563' || raw === '#a6a7b3' ? newEdgeStyle().color : raw
+      })(),
       bold: /bold|[6-9]00/.test(strAttr(labelEl, 'font-weight', '')),
       italic: strAttr(labelEl, 'font-style', '') === 'italic'
     }

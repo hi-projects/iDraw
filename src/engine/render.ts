@@ -17,7 +17,7 @@ import {
   type CanvasNode,
   type ShapeKind
 } from './model'
-import { edgeGeometry, type Rect } from './geometry'
+import { edgeGeometry, edgeLabelPoint, type Rect } from './geometry'
 import { layoutNodeText, shapeParts, textAttrs } from './shapes'
 
 export const SVG_NS = 'http://www.w3.org/2000/svg'
@@ -38,6 +38,8 @@ export interface RenderState {
   doc: CanvasDoc
   viewport: Viewport
   selected: ReadonlySet<string>
+  /** 只读预览里不画可拖动的连线端点 */
+  readOnly: boolean
   /** 正在被浮层编辑的节点:它自己的文字先隐藏,避免和 textarea 重影 */
   editingNode: string | null
   editingEdge: string | null
@@ -413,13 +415,13 @@ export class CanvasRenderer {
   }
 
   private applyEdgeLabel(label: SVGTextElement, edge: CanvasEdge, doc: CanvasDoc): void {
-    const g = edgeGeometry(edge, doc)
+    const at = edgeLabelPoint(edge, doc)
     const lines = edge.label.split('\n')
     const lh = Math.round(edge.style.fontSize * 1.4)
-    // 让文字块的视觉中心落在连线中点(= 选中框中心),而不是基线偏上
-    const startY = g.mid.y + edge.style.fontSize * 0.35 - ((lines.length - 1) * lh) / 2
+    // 让文字块的视觉中心落在标签锚点(= 选中框中心),而不是基线偏上
+    const startY = at.y + edge.style.fontSize * 0.35 - ((lines.length - 1) * lh) / 2
     setAttrs(label, {
-      x: g.mid.x,
+      x: at.x,
       y: startY,
       'text-anchor': 'middle',
       'font-size': edge.style.fontSize,
@@ -435,7 +437,7 @@ export class CanvasRenderer {
     label.replaceChildren()
     lines.forEach((line, i) => {
       const tspan = el('tspan')
-      setAttrs(tspan, { x: g.mid.x, y: startY + i * lh })
+      setAttrs(tspan, { x: at.x, y: startY + i * lh })
       tspan.textContent = line
       label.append(tspan)
     })
@@ -513,11 +515,53 @@ export class CanvasRenderer {
       const edge = doc.edges.find(e => e.id === id)
       if (edge) {
         const g = edgeGeometry(edge, doc)
-        const p = this.toScreen(g.mid.x, g.mid.y)
+        const at = edgeLabelPoint(edge, doc)
+        const p = this.toScreen(at.x, at.y)
         const box = el('rect')
         box.classList.add('canvas-edge-box')
         setAttrs(box, { x: p.x - 18, y: p.y - 12, width: 36, height: 24, rx: 4 })
         this.overlay.append(box)
+
+        // 两端各画一个可拖动的手柄:端点停在拖动的位置;落在形状上按落点挂接,
+        // 落在空白处变成自由端点
+        if (!state.readOnly) {
+          const ends: Array<['from' | 'to', number, number]> = [
+            ['from', g.from.x, g.from.y],
+            ['to', g.to.x, g.to.y]
+          ]
+          for (const [end, x, y] of ends) {
+            const hp = this.toScreen(x, y)
+            const handle = el('circle')
+            handle.classList.add('canvas-edge-end')
+            handle.setAttribute('data-edge-end', end)
+            setAttrs(handle, { cx: hp.x, cy: hp.y, r: 5 })
+            this.overlay.append(handle)
+          }
+
+          // 折点手柄:手动折点优先;自动布线时把现有拐角显示成可拖动手柄,
+          // 拖动一次后整条路线就固定为手动折线。曲线只展示前两个控制点。
+          const source =
+            edge.waypoints && edge.waypoints.length > 0
+              ? edge.waypoints
+              : g.points.slice(1, -1)
+          const waypointPoints = edge.routing === 'curve' ? source.slice(0, 2) : source
+          for (let i = 0; i < waypointPoints.length; i++) {
+            const wp = waypointPoints[i]!
+            const hp = this.toScreen(wp.x, wp.y)
+            const handle = el('rect')
+            handle.classList.add('canvas-edge-waypoint')
+            handle.setAttribute('data-edge-waypoint', String(i))
+            setAttrs(handle, {
+              x: hp.x - 4,
+              y: hp.y - 4,
+              width: 8,
+              height: 8,
+              rx: 2,
+              transform: `rotate(45 ${hp.x} ${hp.y})`
+            })
+            this.overlay.append(handle)
+          }
+        }
       }
     }
 

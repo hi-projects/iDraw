@@ -69,13 +69,18 @@ function upgrade(el: Element): void {
   el.removeAttribute('title')
   const text = title.trim()
   if (!text) return
-  if (!el.hasAttribute('data-tooltip')) el.setAttribute('data-tooltip', text)
+
+  // title 可能在运行时变化(如主题切换按钮的提示)，data-tooltip 必须跟着更新
+  const previous = el.getAttribute('data-tooltip')
+  el.setAttribute('data-tooltip', text)
+
   if (
     el instanceof HTMLElement &&
-    !el.hasAttribute('aria-label') &&
     el.matches('button, a, input, select, textarea, [role="button"]')
   ) {
-    el.setAttribute('aria-label', text)
+    const aria = el.getAttribute('aria-label')
+    // 只更新由提示系统补上的 aria-label，不覆盖业务自己绑定的可访问名称
+    if (!aria || aria === previous) el.setAttribute('aria-label', text)
   }
 }
 

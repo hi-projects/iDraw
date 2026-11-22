@@ -471,7 +471,7 @@ function createWindow(): void {
     show: false,
     title: 'iDraw',
     icon: windowIcon(),
-    backgroundColor: '#f4f4f7',
+    backgroundColor: '#edf1ef',
     /*
      * Windows / Linux:去掉原生标题栏,由渲染层在右上角画最小化/关闭按钮
      * (不提供最大化按钮)。macOS 保留原生标题栏(交通灯位置需要单独适配)。

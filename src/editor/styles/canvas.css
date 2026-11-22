@@ -430,6 +430,30 @@
   pointer-events: none;
 }
 
+/* 选中连线两端的可拖动端点:拖到形状上重挂,拖到空白处变自由端点 */
+.canvas-edge-end {
+  fill: #ffffff;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  cursor: crosshair;
+}
+
+.canvas-edge-end:hover {
+  fill: color-mix(in srgb, var(--accent) 22%, #ffffff);
+}
+
+/* 连线折点:菱形手柄,拖动可改路由 */
+.canvas-edge-waypoint {
+  fill: var(--bg-toolbar);
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  cursor: move;
+}
+
+.canvas-edge-waypoint:hover {
+  fill: var(--accent-soft);
+}
+
 .canvas-marquee {
   fill: rgb(59 130 246 / 0.08);
   stroke: var(--accent);
@@ -484,7 +508,9 @@
 }
 
 .canvas-edge-hover {
-  stroke-width: 2.5;
+  /* 悬停只加一层柔光,不改线宽 —— 箭头 marker 按 strokeWidth 缩放,
+     加粗线宽会连带把箭头一起放大 */
+  filter: drop-shadow(0 0 2px color-mix(in srgb, var(--accent) 45%, transparent));
 }
 
 /* 空心箭头内部用画布底色,深色主题下不会出现白色三角 */
@@ -514,6 +540,13 @@
   overflow: hidden;
   outline: none;
   box-shadow: none;
+}
+
+/* 连线标签的编辑框:和节点文字编辑区分开,加一圈可见的边框 */
+.canvas-text-editor.canvas-text-editor-label {
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 /* ---------- 属性面板 ---------- */

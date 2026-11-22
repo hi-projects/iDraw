@@ -6,8 +6,8 @@
  * 所有坐标在进入本模块时已经是世界坐标,缩放只出现在屏幕距离的换算上。
  */
 import {
-  type AnchorSide,
   type CanvasDoc,
+  type CanvasEdge,
   type CanvasNode,
   type CanvasTool,
   type ShapeKind,
@@ -23,9 +23,17 @@ import {
   type Point,
   type Rect,
   anchorPoint,
+  closestPointOnNode,
+  edgeGeometry,
+  edgeLabelPoint,
+  edgeLabelPos,
   hitEdge,
   hitNode,
+  nearestFractionOnEdge,
+  pointRatio,
   previewGeometry,
+  sideOfPoint,
+  sideToward,
   snapToGrid
 } from './geometry'
 import { type Patch, nodeDiffPatches } from './history'
@@ -115,6 +123,8 @@ type Drag =
       from: Point
       fromNode: CanvasNode | null
       fromSide: Side
+      /** 起点吸附到的锚点侧;null = 从形状上的任意落点起线 */
+      fromAnchor: Side | null
       target: CanvasNode | null
       targetSide: Side
       startWorld: Point
@@ -123,6 +133,30 @@ type Drag =
       kind: 'create'
       start: Point
       current: Point
+      moved: boolean
+    }
+  | {
+      /** 拖动已选中连线的一端 */
+      kind: 'edge-end'
+      edgeId: string
+      end: 'from' | 'to'
+      before: CanvasEdge
+      moved: boolean
+    }
+  | {
+      /** 拖动已选中连线的标签,沿路径滑动 */
+      kind: 'edge-label'
+      edgeId: string
+      before: CanvasEdge
+      start: Point
+      moved: boolean
+    }
+  | {
+      /** 拖动连线的折点:自动布线的拐角第一次拖动后固定为手动折线 */
+      kind: 'edge-waypoint'
+      edgeId: string
+      index: number
+      before: CanvasEdge
       moved: boolean
     }
 
@@ -173,19 +207,14 @@ function shiftedBounds(nodes: CanvasNode[], dx: number, dy: number): Rect | null
   return { x: minX, y: minY, w: maxX - minX, h: maxY - minY }
 }
 
-function nearestSide(node: CanvasNode, p: Point): Side {
-  const sides: Side[] = ['n', 'e', 's', 'w']
-  let best: Side = 'e'
-  let bestDist = Infinity
-  for (const side of sides) {
-    const a = anchorPoint(node, side)
-    const d = Math.hypot(a.x - p.x, a.y - p.y)
-    if (d < bestDist) {
-      bestDist = d
-      best = side
-    }
-  }
-  return best
+/** 世界坐标保留两位小数(自由端点) */
+function round2(n: number): number {
+  return Math.round(n * 100) / 100
+}
+
+/** 相对节点宽高的比例保留四位小数,缩放后端点仍落在原来的像素位置附近 */
+function round4(n: number): number {
+  return Math.round(n * 10000) / 10000
 }
 
 /** 对齐吸附:移动中的包围盒与其它节点的边/中心差在阈值内就贴上去 */
@@ -227,6 +256,32 @@ function alignSnap(
   const nx = dx + (bestX ?? 0)
   const ny = dy + (bestY ?? 0)
   return { dx: nx, dy: ny, guides: collectGuides(moving, nx, ny, doc, exclude) }
+}
+
+/**
+ * 缩放手柄的磁性吸附:只移动被拖的那条边,吸附到其它节点的边/中线。
+ * 和拖动一样按 1 个单位起步,不再按 20px 网格跳格。
+ */
+function snapResizeEdge(
+  value: number,
+  axis: 'x' | 'y',
+  doc: CanvasDoc,
+  exclude: ReadonlySet<string>,
+  threshold: number
+): number | null {
+  let best: number | null = null
+  for (const n of doc.nodes) {
+    if (exclude.has(n.id)) continue
+    const candidates =
+      axis === 'x' ? [n.x, n.x + n.w / 2, n.x + n.w] : [n.y, n.y + n.h / 2, n.y + n.h]
+    for (const candidate of candidates) {
+      const diff = Math.abs(candidate - value)
+      if (diff <= threshold && (best === null || diff < Math.abs(best - value))) {
+        best = candidate
+      }
+    }
+  }
+  return best
 }
 
 function collectGuides(
@@ -365,12 +420,34 @@ export class Interactions {
       return
     }
 
+    // 连线工具:画布上任何位置按下都能起一条线;靠近特殊点/按在形状上就挂到该形状
+    if (!this.host.readOnly && this.host.tool === 'edge') {
+      const anchor = this.anchorSnapAt(p)
+      const edge = anchor ? null : this.edgeSnapAt(p)
+      const node = anchor?.node ?? edge?.node ?? hitNode(this.host.doc, p)
+      const from = anchor?.point ?? edge?.point ?? p
+      this.drag = {
+        kind: 'connect',
+        from,
+        fromNode: node,
+        fromSide: anchor?.side ?? (node ? sideOfPoint(node, from) : 'e'),
+        fromAnchor: anchor?.side ?? null,
+        target: null,
+        targetSide: 'n',
+        startWorld: p
+      }
+      return
+    }
+
     if (!this.host.readOnly) {
       const handle = this.handleAt(e)
       if (handle) {
         const id = this.host.selected.values().next().value
         const node = id ? this.host.doc.nodes.find(n => n.id === id) : null
         if (node) {
+          // 开始缩放时清掉悬停锚点,别让它们在旧位置留下残影
+          this.setHoverNode(null)
+          this.host.setPreview(null, null)
           this.drag = {
             kind: 'resize',
             handle: handle.name,
@@ -385,6 +462,60 @@ export class Interactions {
       }
     }
 
+    // 已选中连线的端点手柄:优先于锚点命中,允许拖动重挂
+    if (!this.host.readOnly) {
+      const endHit = this.edgeEndAt(e)
+      if (endHit) {
+        this.setHoverNode(null)
+        this.host.setPreview(null, null)
+        this.drag = {
+          kind: 'edge-end',
+          edgeId: endHit.edge.id,
+          end: endHit.end,
+          before: cloneEdge(endHit.edge),
+          moved: false
+        }
+        this.host.setCursor('crosshair')
+        return
+      }
+    }
+
+    // 已选中连线的折点手柄:优先于标签框,两者重合时也能直接抓住折点
+    if (!this.host.readOnly) {
+      const waypoint = this.edgeWaypointAt(e)
+      if (waypoint) {
+        this.setHoverNode(null)
+        this.host.setPreview(null, null)
+        this.drag = {
+          kind: 'edge-waypoint',
+          edgeId: waypoint.edge.id,
+          index: waypoint.index,
+          before: cloneEdge(waypoint.edge),
+          moved: false
+        }
+        this.host.setCursor('move')
+        return
+      }
+    }
+
+    // 已选中连线的标签框:拖动它沿路径滑动标签
+    if (!this.host.readOnly) {
+      const labelEdge = this.edgeLabelAt(e)
+      if (labelEdge) {
+        this.setHoverNode(null)
+        this.host.setPreview(null, null)
+        this.drag = {
+          kind: 'edge-label',
+          edgeId: labelEdge.id,
+          before: cloneEdge(labelEdge),
+          start: p,
+          moved: false
+        }
+        this.host.setCursor('grabbing')
+        return
+      }
+    }
+
     // 锚点:只有当前悬浮节点画了锚点,点到的才是它
     if (!this.host.readOnly) {
       const hover = this.hoverNodeId ? this.host.doc.nodes.find(n => n.id === this.hoverNodeId) : null
@@ -396,6 +527,7 @@ export class Interactions {
             from: anchorPoint(hover, side),
             fromNode: hover,
             fromSide: side,
+            fromAnchor: side,
             target: null,
             targetSide: 'n',
             startWorld: p
@@ -407,19 +539,6 @@ export class Interactions {
 
     const node = hitNode(this.host.doc, p)
     if (node) {
-      if (!this.host.readOnly && this.host.tool === 'edge') {
-        const side = nearestSide(node, p)
-        this.drag = {
-          kind: 'connect',
-          from: anchorPoint(node, side),
-          fromNode: node,
-          fromSide: side,
-          target: null,
-          targetSide: 'n',
-          startWorld: p
-        }
-        return
-      }
       if (e.shiftKey) {
         this.host.setSelection([node.id], 'toggle')
         return
@@ -430,6 +549,9 @@ export class Interactions {
       const ids = new Set(this.host.selected)
       const before = this.host.doc.nodes.filter(n => ids.has(n.id)).map(cloneNode)
       if (before.length === 0) return
+      // 开始移动时清掉悬停锚点,避免它们在原位留下几个点
+      this.setHoverNode(null)
+      this.host.setPreview(null, null)
       this.drag = {
         kind: 'move',
         start: p,
@@ -527,15 +649,45 @@ export class Interactions {
         let top = orig.y
         let right = orig.x + orig.w
         let bottom = orig.y + orig.h
-        if (drag.handle.includes('w')) left = orig.x + dx
-        if (drag.handle.includes('e')) right = orig.x + orig.w + dx
-        if (drag.handle.includes('n')) top = orig.y + dy
-        if (drag.handle.includes('s')) bottom = orig.y + orig.h + dy
+        if (drag.handle.includes('w')) left = Math.round(orig.x + dx)
+        if (drag.handle.includes('e')) right = Math.round(orig.x + orig.w + dx)
+        if (drag.handle.includes('n')) top = Math.round(orig.y + dy)
+        if (drag.handle.includes('s')) bottom = Math.round(orig.y + orig.h + dy)
         if (this.host.snapEnabled()) {
-          if (drag.handle.includes('w')) left = snapToGrid(left, GRID_SIZE)
-          if (drag.handle.includes('e')) right = snapToGrid(right, GRID_SIZE)
-          if (drag.handle.includes('n')) top = snapToGrid(top, GRID_SIZE)
-          if (drag.handle.includes('s')) bottom = snapToGrid(bottom, GRID_SIZE)
+          const threshold = 6 / this.host.viewport.scale
+          const exclude = new Set([drag.before.id])
+          const guides: Guide[] = []
+          if (drag.handle.includes('w')) {
+            const snapped = snapResizeEdge(left, 'x', this.host.doc, exclude, threshold)
+            if (snapped !== null) {
+              left = snapped
+              guides.push({ axis: 'x', value: snapped })
+            }
+          }
+          if (drag.handle.includes('e')) {
+            const snapped = snapResizeEdge(right, 'x', this.host.doc, exclude, threshold)
+            if (snapped !== null) {
+              right = snapped
+              guides.push({ axis: 'x', value: snapped })
+            }
+          }
+          if (drag.handle.includes('n')) {
+            const snapped = snapResizeEdge(top, 'y', this.host.doc, exclude, threshold)
+            if (snapped !== null) {
+              top = snapped
+              guides.push({ axis: 'y', value: snapped })
+            }
+          }
+          if (drag.handle.includes('s')) {
+            const snapped = snapResizeEdge(bottom, 'y', this.host.doc, exclude, threshold)
+            if (snapped !== null) {
+              bottom = snapped
+              guides.push({ axis: 'y', value: snapped })
+            }
+          }
+          this.host.setGuides(guides)
+        } else {
+          this.host.setGuides([])
         }
         if (right - left < minSize) {
           if (drag.handle.includes('w')) left = right - minSize
@@ -570,38 +722,103 @@ export class Interactions {
         if (Math.hypot(p.x - drag.startWorld.x, p.y - drag.startWorld.y) > 2) {
           this.host.setCursor('crosshair')
         }
-        const target = hitNode(
-          this.host.doc,
-          p,
-          Math.max(0, 4 / this.host.viewport.scale)
-        )
         const from = drag.from
-        if (target && target.id === drag.fromNode?.id) {
-          drag.target = null
-        } else {
-          drag.target = target
-        }
-        const to = drag.target
-          ? anchorPoint(drag.target, nearestSide(drag.target, p))
-          : p
-        if (drag.target) drag.targetSide = nearestSide(drag.target, p)
-        // 自由端没有形状可依,按方向取一个朝向对方的边:横向走 w/e,纵向走 n/s
-        const freeSide: Side =
-          Math.abs(to.x - from.x) >= Math.abs(to.y - from.y)
-            ? to.x >= from.x
-              ? 'w'
-              : 'e'
-            : to.y >= from.y
-              ? 'n'
-              : 's'
+        const resolved = this.resolveConnectTarget(p, drag.fromNode?.id ?? null)
+        drag.target = resolved.node
+        if (drag.target) drag.targetSide = resolved.side ?? sideOfPoint(drag.target, p, drag.from)
+        // 靠近特殊点就吸附过去;否则端点停在指针落点
+        const to = resolved.point
+        // 自由端没有形状可依,取朝向另一端的一侧;预览与落成后的路由保持一致
+        const freeSide: Side = sideToward(to, from)
+        const fromSide: Side = drag.fromNode ? drag.fromSide : sideToward(from, to)
         const geometry = previewGeometry(
           from,
           to,
           'orthogonal',
-          drag.fromSide,
+          fromSide,
           drag.target ? drag.targetSide : freeSide
         )
         this.host.setPreview(geometry.d, drag.target ?? drag.fromNode)
+        break
+      }
+      case 'edge-end': {
+        const edge = this.host.doc.edges.find(x => x.id === drag.edgeId)
+        if (!edge) break
+        const end = edge[drag.end]
+        // 端点跟着指针走:靠近特殊点吸附到锚点,靠近形状边缘吸附到轮廓;
+        // 落在形状内部按落点的相对位置挂接(移动形状仍会跟随);
+        // 落在空白处就是画布上任意位置的自由端点
+        const anchor = this.anchorSnapAt(p)
+        const edgeSnap = anchor ? null : this.edgeSnapAt(p)
+        const target =
+          anchor?.node ??
+          edgeSnap?.node ??
+          hitNode(this.host.doc, p, Math.max(0, 4 / this.host.viewport.scale))
+        if (anchor) {
+          end.node = anchor.node.id
+          end.anchor = anchor.side
+          end.x = 0
+          end.y = 0
+        } else if (edgeSnap) {
+          const ratio = pointRatio(edgeSnap.node, edgeSnap.point)
+          end.node = edgeSnap.node.id
+          end.anchor = 'free'
+          end.x = round4(ratio.x)
+          end.y = round4(ratio.y)
+        } else if (target) {
+          const ratio = pointRatio(target, p)
+          end.node = target.id
+          end.anchor = 'free'
+          end.x = round4(ratio.x)
+          end.y = round4(ratio.y)
+        } else {
+          end.node = null
+          end.anchor = 'auto'
+          end.x = round2(p.x)
+          end.y = round2(p.y)
+        }
+        drag.moved = true
+        this.host.setCursor('crosshair')
+        // 显示候选节点的四个锚点,吸附时能看清落在哪个特殊点上
+        this.host.setPreview(null, target)
+        this.host.renderFast(new Set(), new Set([edge.id]))
+        this.host.renderOverlay()
+        break
+      }
+      case 'edge-label': {
+        const edge = this.host.doc.edges.find(x => x.id === drag.edgeId)
+        if (!edge) break
+        // 单击不移动标签(给双击编辑留出空间);超过阈值才认为是拖动
+        if (!drag.moved) {
+          const threshold = 3 / this.host.viewport.scale
+          if (Math.hypot(p.x - drag.start.x, p.y - drag.start.y) < threshold) break
+          drag.moved = true
+        }
+        // 指针投影到路径上,换算成 0–1 的比例
+        edge.labelPos = round4(nearestFractionOnEdge(edge, this.host.doc, p))
+        this.host.setCursor('grabbing')
+        this.host.renderFast(new Set(), new Set([edge.id]))
+        this.host.renderOverlay()
+        break
+      }
+      case 'edge-waypoint': {
+        const edge = this.host.doc.edges.find(x => x.id === drag.edgeId)
+        if (!edge) break
+        // 第一次拖动时把当前自动布线的拐角固化成手动折点
+        if (!edge.waypoints || edge.waypoints.length === 0) {
+          const g = edgeGeometry(edge, this.host.doc)
+          edge.waypoints = g.points.slice(1, -1).map(point => ({ x: point.x, y: point.y }))
+        }
+        const waypoint = edge.waypoints[drag.index]
+        if (!waypoint) break
+        const snapped = this.snapWaypoint(edge, p, drag.index)
+        waypoint.x = round2(snapped.point.x)
+        waypoint.y = round2(snapped.point.y)
+        this.host.setGuides(snapped.guides)
+        drag.moved = true
+        this.host.setCursor('move')
+        this.host.renderFast(new Set(), new Set([edge.id]))
+        this.host.renderOverlay()
         break
       }
       case 'create': {
@@ -718,16 +935,67 @@ export class Interactions {
         this.host.setCursor('default')
         break
       }
+      case 'edge-end': {
+        const edge = this.host.doc.edges.find(x => x.id === drag.edgeId)
+        if (edge) {
+          const before = drag.before[drag.end]
+          const after = edge[drag.end]
+          // free 端点的 x/y 是相对比例,精度比世界坐标更高;所有挂接方式都比一遍
+          const changed =
+            before.node !== after.node ||
+            before.anchor !== after.anchor ||
+            Math.abs(before.x - after.x) > 0.0001 ||
+            Math.abs(before.y - after.y) > 0.0001
+          if (drag.moved && changed) {
+            this.host.commitApplied(
+              [{ op: 'replaceEdge', id: edge.id, edge: drag.before }],
+              [{ op: 'replaceEdge', id: edge.id, edge: cloneEdge(edge) }]
+            )
+          }
+          this.host.renderAll()
+        }
+        this.host.setCursor('default')
+        break
+      }
+      case 'edge-label': {
+        const edge = this.host.doc.edges.find(x => x.id === drag.edgeId)
+        if (edge) {
+          if (drag.moved && Math.abs(edgeLabelPos(drag.before) - edgeLabelPos(edge)) > 0.0001) {
+            this.host.commitApplied(
+              [{ op: 'replaceEdge', id: edge.id, edge: drag.before }],
+              [{ op: 'replaceEdge', id: edge.id, edge: cloneEdge(edge) }]
+            )
+          }
+          // 没有拖动就不要整场景重绘,否则会打断双击判定(标签永远进不了编辑)
+          if (drag.moved) this.host.renderAll()
+        }
+        this.host.setCursor('default')
+        break
+      }
+      case 'edge-waypoint': {
+        const edge = this.host.doc.edges.find(x => x.id === drag.edgeId)
+        if (edge && drag.moved) {
+          this.host.commitApplied(
+            [{ op: 'replaceEdge', id: edge.id, edge: drag.before }],
+            [{ op: 'replaceEdge', id: edge.id, edge: cloneEdge(edge) }]
+          )
+          this.host.renderAll()
+        }
+        this.host.setCursor('default')
+        break
+      }
       case 'marquee':
         this.host.setSelection(this.marqueeSelection({ ...drag, current: p }), drag.additive ? 'add' : 'replace')
         this.host.setCursor('default')
         break
       case 'connect': {
         this.host.setPreview(null, null)
-        if (drag.target && drag.target.id !== drag.fromNode?.id) {
-          this.createEdge(drag, drag.target, p)
-        } else if (!drag.target && Math.hypot(p.x - drag.startWorld.x, p.y - drag.startWorld.y) > 8) {
-          this.createEdge(drag, null, p)
+        // 松手时按最终位置再解析一次,避免最后一次 pointermove 与 pointerup 之间有偏差
+        const resolved = this.resolveConnectTarget(p, drag.fromNode?.id ?? null)
+        if (resolved.node) {
+          this.createEdge(drag, resolved.node, resolved.point, resolved.side)
+        } else if (Math.hypot(p.x - drag.startWorld.x, p.y - drag.startWorld.y) > 8) {
+          this.createEdge(drag, null, p, null)
         }
         this.host.setCursor('default')
         break
@@ -746,12 +1014,33 @@ export class Interactions {
     this.host.setCursor(this.host.tool === 'pan' ? 'grab' : 'default')
   }
 
-  private updateHover(_e: PointerEvent, p: Point): void {
+  private updateHover(e: PointerEvent, p: Point): void {
     if (this.host.tool === 'shape' || this.host.tool === 'text') {
       this.setHoverNode(null)
       this.setHoverEdge(null)
       // 十字光标只在真正按住拖动时出现,空闲悬浮保持普通箭头
       this.host.setCursor('default')
+      return
+    }
+    // 已选中连线的端点:显示十字光标,提示可以拖动重挂
+    if (!this.host.readOnly && this.edgeEndAt(e)) {
+      this.setHoverNode(null)
+      this.setHoverEdge(null)
+      this.host.setCursor('crosshair')
+      return
+    }
+    // 已选中连线的折点:提示可以拖动改路由
+    if (!this.host.readOnly && this.edgeWaypointAt(e)) {
+      this.setHoverNode(null)
+      this.setHoverEdge(null)
+      this.host.setCursor('move')
+      return
+    }
+    // 已选中连线的标签框:提示可以沿线拖动
+    if (!this.host.readOnly && this.edgeLabelAt(e)) {
+      this.setHoverNode(null)
+      this.setHoverEdge(null)
+      this.host.setCursor('grab')
       return
     }
     const node = hitNode(this.host.doc, p)
@@ -804,25 +1093,42 @@ export class Interactions {
     this.host.beginTextEdit({ kind: 'node', id: node.id })
   }
 
-  private createEdge(drag: Extract<Drag, { kind: 'connect' }>, target: CanvasNode | null, end: Point): void {
+  private createEdge(
+    drag: Extract<Drag, { kind: 'connect' }>,
+    target: CanvasNode | null,
+    end: Point,
+    targetAnchor: Side | null
+  ): void {
     const doc = this.host.doc
-    const edge = {
+    const fromRatio = drag.fromNode ? pointRatio(drag.fromNode, drag.from) : null
+    const toRatio = target && !targetAnchor ? pointRatio(target, end) : null
+    // 吸附到特殊点:存下锚点侧,缩放形状后仍落在该侧中点;
+    // 否则落在形状上的任意位置:记下落点的相对比例,端点停在指针处、移动形状时跟随
+    const edge: CanvasEdge = {
       id: newId(doc, 'e'),
-      from: {
-        node: drag.fromNode?.id ?? null,
-        anchor: (drag.fromNode ? drag.fromSide : 'auto') as AnchorSide,
-        x: drag.from.x,
-        y: drag.from.y
-      },
-      to: {
-        node: target?.id ?? null,
-        anchor: (target ? drag.targetSide : 'auto') as AnchorSide,
-        x: end.x,
-        y: end.y
-      },
-      routing: 'orthogonal' as const,
-      arrow: 'end' as const,
-      arrowStyle: 'solid' as const,
+      from: drag.fromNode
+        ? drag.fromAnchor
+          ? { node: drag.fromNode.id, anchor: drag.fromAnchor, x: 0, y: 0 }
+          : {
+              node: drag.fromNode.id,
+              anchor: 'free',
+              x: round4(fromRatio?.x ?? 0),
+              y: round4(fromRatio?.y ?? 0)
+            }
+        : { node: null, anchor: 'auto', x: round2(drag.from.x), y: round2(drag.from.y) },
+      to: target
+        ? targetAnchor
+          ? { node: target.id, anchor: targetAnchor, x: 0, y: 0 }
+          : {
+              node: target.id,
+              anchor: 'free',
+              x: round4(toRatio?.x ?? 0),
+              y: round4(toRatio?.y ?? 0)
+            }
+        : { node: null, anchor: 'auto', x: round2(end.x), y: round2(end.y) },
+      routing: 'orthogonal',
+      arrow: 'end',
+      arrowStyle: 'solid',
       arrowSize: 9,
       label: '',
       style: newEdgeStyle()
@@ -883,6 +1189,101 @@ export class Interactions {
     return null
   }
 
+  /** 命中选择边框内的端点手柄(屏幕距离 8px 内) */
+  private edgeEndAt(e: PointerEvent): { edge: CanvasEdge; end: 'from' | 'to' } | null {
+    if (this.host.selected.size !== 1) return null
+    const id = this.host.selected.values().next().value
+    const edge = id ? this.host.doc.edges.find(x => x.id === id) ?? null : null
+    if (!edge) return null
+    const rect = this.el.getBoundingClientRect()
+    const cx = e.clientX - rect.left
+    const cy = e.clientY - rect.top
+    const g = edgeGeometry(edge, this.host.doc)
+    for (const end of ['from', 'to'] as const) {
+      const point = end === 'from' ? g.from : g.to
+      const p = this.host.renderer.screenOf(point.x, point.y)
+      if (Math.hypot(cx - p.x, cy - p.y) <= 8) return { edge, end }
+    }
+    return null
+  }
+
+  /**
+   * 折点拖动时的对齐吸附:吸附到节点的左/中/右、上/中/下三线,本边两端,
+   * 以及这条边的其它折点。与节点拖动共用「网格吸附」开关,并显示参考线。
+   */
+  private snapWaypoint(
+    edge: CanvasEdge,
+    p: Point,
+    index: number
+  ): { point: Point; guides: Guide[] } {
+    if (!this.host.snapEnabled()) return { point: p, guides: [] }
+    const threshold = 6 / this.host.viewport.scale
+    const xs: number[] = []
+    const ys: number[] = []
+    for (const n of this.host.doc.nodes) {
+      xs.push(n.x, n.x + n.w / 2, n.x + n.w)
+      ys.push(n.y, n.y + n.h / 2, n.y + n.h)
+    }
+    const g = edgeGeometry(edge, this.host.doc)
+    xs.push(g.from.x, g.to.x)
+    ys.push(g.from.y, g.to.y)
+    edge.waypoints?.forEach((wp, i) => {
+      if (i === index) return
+      xs.push(wp.x)
+      ys.push(wp.y)
+    })
+    const pick = (values: number[], value: number): number | null => {
+      let best: number | null = null
+      for (const candidate of values) {
+        const diff = Math.abs(candidate - value)
+        if (diff <= threshold && (best === null || diff < Math.abs(best - value))) {
+          best = candidate
+        }
+      }
+      return best
+    }
+    const snappedX = pick(xs, p.x)
+    const snappedY = pick(ys, p.y)
+    const guides: Guide[] = []
+    if (snappedX !== null) guides.push({ axis: 'x', value: snappedX })
+    if (snappedY !== null) guides.push({ axis: 'y', value: snappedY })
+    return { point: { x: snappedX ?? p.x, y: snappedY ?? p.y }, guides }
+  }
+
+  /** 命中连线折点手柄(屏幕距离 8px 内) */
+  private edgeWaypointAt(e: PointerEvent | MouseEvent): { edge: CanvasEdge; index: number } | null {
+    if (this.host.selected.size !== 1) return null
+    const id = this.host.selected.values().next().value
+    const edge = id ? this.host.doc.edges.find(x => x.id === id) ?? null : null
+    if (!edge) return null
+    const rect = this.el.getBoundingClientRect()
+    const cx = e.clientX - rect.left
+    const cy = e.clientY - rect.top
+    const g = edgeGeometry(edge, this.host.doc)
+    const source =
+      edge.waypoints && edge.waypoints.length > 0 ? edge.waypoints : g.points.slice(1, -1)
+    const points = edge.routing === 'curve' ? source.slice(0, 2) : source
+    for (let i = 0; i < points.length; i++) {
+      const p = this.host.renderer.screenOf(points[i]!.x, points[i]!.y)
+      if (Math.hypot(cx - p.x, cy - p.y) <= 8) return { edge, index: i }
+    }
+    return null
+  }
+
+  /** 命中选择框内的标签锚点(选中框 36×24 屏幕像素,命中范围略放宽) */
+  private edgeLabelAt(e: PointerEvent): CanvasEdge | null {
+    if (this.host.selected.size !== 1) return null
+    const id = this.host.selected.values().next().value
+    const edge = id ? this.host.doc.edges.find(x => x.id === id) ?? null : null
+    if (!edge) return null
+    const rect = this.el.getBoundingClientRect()
+    const cx = e.clientX - rect.left
+    const cy = e.clientY - rect.top
+    const at = edgeLabelPoint(edge, this.host.doc)
+    const p = this.host.renderer.screenOf(at.x, at.y)
+    return Math.abs(cx - p.x) <= 20 && Math.abs(cy - p.y) <= 14 ? edge : null
+  }
+
   private anchorAt(node: CanvasNode, p: Point): Side | null {
     const tol = 9 / this.host.viewport.scale
     for (const side of ['n', 'e', 's', 'w'] as Side[]) {
@@ -890,6 +1291,84 @@ export class Interactions {
       if (Math.hypot(a.x - p.x, a.y - p.y) <= tol) return side
     }
     return null
+  }
+
+  /**
+   * 端点磁性吸附:指针靠近任意节点的四侧锚点(屏幕 10px 内)时,返回最近的锚点。
+   * 不排除节点时,拖动端点可以吸附回当前形状;拉新连线时排除起点节点。
+   */
+  private anchorSnapAt(
+    p: Point,
+    excludeNodeId: string | null = null
+  ): { node: CanvasNode; side: Side; point: Point } | null {
+    const tol = 10 / this.host.viewport.scale
+    let best: { node: CanvasNode; side: Side; point: Point; dist: number } | null = null
+    for (const node of this.host.doc.nodes) {
+      if (node.id === excludeNodeId) continue
+      for (const side of ['n', 'e', 's', 'w'] as Side[]) {
+        const point = anchorPoint(node, side)
+        const dist = Math.hypot(point.x - p.x, point.y - p.y)
+        if (dist <= tol && (!best || dist < best.dist)) best = { node, side, point, dist }
+      }
+    }
+    return best
+  }
+
+  /**
+   * 吸附到形状边缘:指针靠近节点轮廓(屏幕 8px 内)时,返回轮廓上最近的点。
+   * 指针压在节点上时只考虑该节点,避免吸附到被盖住的其它形状的边。
+   */
+  private edgeSnapAt(
+    p: Point,
+    excludeNodeId: string | null = null
+  ): { node: CanvasNode; point: Point } | null {
+    const tol = 8 / this.host.viewport.scale
+    const hit = hitNode(this.host.doc, p)
+    // 指针压着节点时只考虑它;正压在起点节点上时不把终点吸附到别的形状
+    const candidates = hit
+      ? hit.id === excludeNodeId
+        ? []
+        : [hit]
+      : this.host.doc.nodes.filter(n => n.id !== excludeNodeId)
+    let best: { node: CanvasNode; point: Point; dist: number } | null = null
+    for (const node of candidates) {
+      // 外接框都离指针超过阈值时不用算轮廓
+      if (
+        p.x < node.x - tol ||
+        p.x > node.x + node.w + tol ||
+        p.y < node.y - tol ||
+        p.y > node.y + node.h + tol
+      ) {
+        continue
+      }
+      const closest = closestPointOnNode(node, p)
+      if (!closest || closest.distance > tol) continue
+      if (!best || closest.distance < best.dist) {
+        best = { node, point: closest.point, dist: closest.distance }
+      }
+    }
+    return best ? { node: best.node, point: best.point } : null
+  }
+
+  /**
+   * 连线的落点:优先吸附四侧锚点,其次吸附形状边缘,
+   * 再次落在形状上的任意位置,最后是画布上的自由端点。
+   */
+  private resolveConnectTarget(
+    p: Point,
+    excludeNodeId: string | null
+  ): { node: CanvasNode | null; side: Side | null; point: Point } {
+    const anchor = this.anchorSnapAt(p, excludeNodeId)
+    if (anchor) return { node: anchor.node, side: anchor.side, point: anchor.point }
+    const edge = this.edgeSnapAt(p, excludeNodeId)
+    if (edge) return { node: edge.node, side: null, point: edge.point }
+    const target = hitNode(
+      this.host.doc,
+      p,
+      Math.max(0, 4 / this.host.viewport.scale)
+    )
+    if (target && target.id !== excludeNodeId) return { node: target, side: null, point: p }
+    return { node: null, side: null, point: p }
   }
 
   private marqueeSelection(drag: Extract<Drag, { kind: 'marquee' }>): string[] {
@@ -902,6 +1381,21 @@ export class Interactions {
 
   private onDblClick = (e: MouseEvent): void => {
     if (this.host.readOnly) return
+    // 双击手动折点:删掉这个折点;全部删完就回到自动路由
+    const waypoint = this.edgeWaypointAt(e)
+    const waypointEdge = waypoint?.edge
+    if (waypoint && waypointEdge?.waypoints) {
+      const waypoints = waypointEdge.waypoints
+      const before = cloneEdge(waypointEdge)
+      waypoints.splice(waypoint.index, 1)
+      if (waypoints.length === 0) delete waypointEdge.waypoints
+      this.host.commitApplied(
+        [{ op: 'replaceEdge', id: waypointEdge.id, edge: before }],
+        [{ op: 'replaceEdge', id: waypointEdge.id, edge: cloneEdge(waypointEdge) }]
+      )
+      this.host.renderAll()
+      return
+    }
     const p = this.world(e)
     const node = hitNode(this.host.doc, p)
     if (node) {

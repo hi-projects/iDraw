@@ -225,6 +225,13 @@ async function main() {
   console.log('[2] 临时画布:用形状工具创建 5 个节点')
   await js(wc, "document.querySelector('.workspace-recent-add-slot button').click()")
   check('加号菜单出现', await waitFor(wc, "!!document.querySelector('.workspace-recent-empty-menu')"))
+  check(
+    '选择页入口显示为新建画布',
+    await js(
+      wc,
+      "document.querySelector('[data-action=temporary-canvas]').textContent.includes('新建画布')"
+    )
+  )
   await js(wc, "document.querySelector('[data-action=temporary-canvas]').click()")
   check('进入临时画布', await waitFor(wc, "!!document.querySelector('.canvas-surface')"))
   await wait(150)
@@ -393,8 +400,9 @@ async function main() {
           bubbles: true, cancelable: true, clientX: p.x, clientY: p.y,
           button: 0, buttons, pointerId: 1, isPrimary: true, pointerType: 'mouse'
         }))
-        // 先悬浮让锚点出现,再从东侧锚点拖到目标节点
-        fire('pointermove', toClient(from.x + from.w / 2, from.y + from.h / 2), 0)
+        // 先悬浮在东侧锚点上让锚点出现,再从该锚点拖到目标节点
+        // (悬浮节点中心可能正好压着上一条连线的端点手柄)
+        fire('pointermove', toClient(from.x + from.w, from.y + from.h / 2), 0)
         fire('pointerdown', toClient(from.x + from.w, from.y + from.h / 2), 1)
         fire('pointermove', toClient(to.x + to.w / 2, to.y + to.h / 2), 1)
         fire('pointerup', toClient(to.x + to.w / 2, to.y + to.h / 2), 0)
@@ -539,6 +547,560 @@ async function main() {
     await js(wc, "document.querySelector('[aria-label=\"标签倾斜\"]')?.classList.contains('active')")
   )
 
+  console.log('[2.6] 拖动连线端点')
+  // 点连线中点选中它,选中后应出现两端手柄
+  await js(
+    wc,
+    `(() => {
+      const surface = document.querySelector('.canvas-surface')
+      const edge = document.querySelector('[data-idraw-edge]')
+      if (!edge) return false
+      const pt = edge.getPointAtLength(edge.getTotalLength() / 2)
+      const screen = pt.matrixTransform(edge.getScreenCTM())
+      const fire = (type, buttons) => surface.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, cancelable: true, clientX: screen.x, clientY: screen.y,
+        button: 0, buttons, pointerId: 1, isPrimary: true
+      }))
+      fire('pointerdown', 1)
+      fire('pointerup', 0)
+      return true
+    })()`
+  )
+  check(
+    '选中连线后显示两个端点手柄',
+    await waitFor(wc, "document.querySelectorAll('[data-edge-end]').length === 2")
+  )
+
+  // 拖动标签框:标签沿路径移动,路径本身不变
+  const labelDrag = await js(
+    wc,
+    `(() => {
+      const surface = document.querySelector('.canvas-surface')
+      const svg = document.querySelector('.canvas-surface svg')
+      const box = document.querySelector('.canvas-edge-box')
+      const edge = document.querySelector('[data-idraw-edge].canvas-edge-selected')
+      if (!svg || !box || !edge) return { ok: false, reason: 'no-box' }
+      const br = svg.getBoundingClientRect()
+      const boxRect = {
+        x: Number(box.getAttribute('x')),
+        y: Number(box.getAttribute('y')),
+        w: Number(box.getAttribute('width')),
+        h: Number(box.getAttribute('height'))
+      }
+      // 从标签框偏右的位置起拖:框中心可能与折点手柄重合,折点优先命中
+      const start = {
+        x: br.left + boxRect.x + boxRect.w / 2 + Math.min(12, boxRect.w / 4),
+        y: br.top + boxRect.y + boxRect.h / 2
+      }
+      const target = edge.getPointAtLength(edge.getTotalLength() * 0.25)
+      const ts = target.matrixTransform(edge.getScreenCTM())
+      const dBefore = edge.getAttribute('d')
+      const fire = (type, px, py, buttons) => surface.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, cancelable: true, clientX: px, clientY: py,
+        button: 0, buttons, pointerId: 1, isPrimary: true
+      }))
+      fire('pointerdown', start.x, start.y, 1)
+      fire('pointermove', ts.x, ts.y, 1)
+      fire('pointerup', ts.x, ts.y, 0)
+      const box2 = document.querySelector('.canvas-edge-box')
+      const edge2 = document.querySelector('[data-idraw-edge].canvas-edge-selected')
+      if (!box2 || !edge2) return { ok: false, reason: 'lost' }
+      const center = {
+        x: Number(box2.getAttribute('x')) + Number(box2.getAttribute('width')) / 2,
+        y: Number(box2.getAttribute('y')) + Number(box2.getAttribute('height')) / 2
+      }
+      return {
+        ok: true,
+        target: { x: ts.x - br.left, y: ts.y - br.top },
+        center,
+        pathUnchanged: dBefore === edge2.getAttribute('d')
+      }
+    })()`
+  )
+  check(
+    '拖动标签框让标签沿路径移动',
+    labelDrag.ok &&
+      Math.abs(labelDrag.center.x - labelDrag.target.x) < 2 &&
+      Math.abs(labelDrag.center.y - labelDrag.target.y) < 2 &&
+      labelDrag.pathUnchanged,
+    labelDrag
+  )
+
+  // 标签编辑框:有可见边框,文字靠上下等量内边距垂直居中
+  const labelEditor = await js(
+    wc,
+    `(() => {
+      const surface = document.querySelector('.canvas-surface')
+      const box = document.querySelector('.canvas-edge-box')
+      const svg = document.querySelector('.canvas-surface svg')
+      if (!box || !svg) return { ok: false, reason: 'no-box' }
+      const br = svg.getBoundingClientRect()
+      const cx = br.left + Number(box.getAttribute('x')) + Number(box.getAttribute('width')) / 2
+      const cy = br.top + Number(box.getAttribute('y')) + Number(box.getAttribute('height')) / 2
+      surface.dispatchEvent(new MouseEvent('dblclick', {
+        bubbles: true, cancelable: true, clientX: cx, clientY: cy
+      }))
+      const ta = document.querySelector('.canvas-text-editor')
+      if (!ta) return { ok: false, reason: 'no-editor' }
+      const style = getComputedStyle(ta)
+      return {
+        ok: true,
+        labelClass: ta.classList.contains('canvas-text-editor-label'),
+        borderWidth: parseFloat(style.borderTopWidth),
+        paddingTop: parseFloat(style.paddingTop)
+      }
+    })()`
+  )
+  check(
+    '标签编辑框有边框且文字垂直居中',
+    labelEditor.ok &&
+      labelEditor.labelClass &&
+      labelEditor.borderWidth >= 1 &&
+      labelEditor.paddingTop > 0,
+    labelEditor
+  )
+  await js(wc, "document.querySelector('.canvas-text-editor')?.blur()")
+  await wait(100)
+
+  const edgeD = () =>
+    js(
+      wc,
+      "document.querySelector('[data-idraw-edge].canvas-edge-selected')?.getAttribute('d') ?? null"
+    )
+  const dBefore = await edgeD()
+  await js(
+    wc,
+    `(() => {
+      const surface = document.querySelector('.canvas-surface')
+      const svg = document.querySelector('.canvas-surface svg')
+      const handle = document.querySelector('[data-edge-end="to"]')
+      if (!svg || !handle) return false
+      const r = svg.getBoundingClientRect()
+      const cx = r.left + Number(handle.getAttribute('cx'))
+      const cy = r.top + Number(handle.getAttribute('cy'))
+      const fire = (type, px, py, buttons) => surface.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, cancelable: true, clientX: px, clientY: py,
+        button: 0, buttons, pointerId: 1, isPrimary: true
+      }))
+      fire('pointerdown', cx, cy, 1)
+      fire('pointermove', cx + 80, cy + 60, 1)
+      fire('pointerup', cx + 80, cy + 60, 0)
+      return true
+    })()`
+  )
+  await wait(150)
+  const dAfter = await edgeD()
+  check('拖动端点改变了连线路径', !!dBefore && !!dAfter && dBefore !== dAfter, {
+    before: dBefore,
+    after: dAfter
+  })
+  wc.send('app:menu-command', 'edit:undo')
+  await wait(150)
+  check('撤销恢复连线路径', (await edgeD()) === dBefore)
+
+  // 端点可以停在形状上的任意位置:拖到第二个节点内部 30%/80% 处,路径终点应精确落在落点
+  const freeEnd = await js(
+    wc,
+    `(() => {
+      const surface = document.querySelector('.canvas-surface')
+      const svg = document.querySelector('.canvas-surface svg')
+      const world = document.querySelector('.canvas-world')
+      const wm = /translate\\(([-\\d.]+) ([-\\d.]+)\\) scale\\(([-\\d.]+)\\)/.exec(world.getAttribute('transform'))
+      if (!wm) return { ok: false, reason: 'no-world' }
+      const tx = +wm[1], ty = +wm[2], scale = +wm[3]
+      const sr = surface.getBoundingClientRect()
+      const toClient = (x, y) => ({ x: sr.left + tx + x * scale, y: sr.top + ty + y * scale })
+      const target = document.querySelectorAll('[data-idraw-node]')[1]
+      const nm = /translate\\(([-\\d.]+) ([-\\d.]+)\\)/.exec(target.getAttribute('transform'))
+      const box = target.getBBox()
+      const drop = { x: +nm[1] + box.width * 0.3, y: +nm[2] + box.height * 0.8 }
+      const handle = document.querySelector('[data-edge-end="to"]')
+      if (!handle) return { ok: false, reason: 'no-handle' }
+      const br = svg.getBoundingClientRect()
+      const cx = br.left + Number(handle.getAttribute('cx'))
+      const cy = br.top + Number(handle.getAttribute('cy'))
+      const p = toClient(drop.x, drop.y)
+      const fire = (type, px, py, buttons) => surface.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, cancelable: true, clientX: px, clientY: py,
+        button: 0, buttons, pointerId: 1, isPrimary: true
+      }))
+      fire('pointerdown', cx, cy, 1)
+      fire('pointermove', p.x, p.y, 1)
+      fire('pointerup', p.x, p.y, 0)
+      const edge = document.querySelector('[data-idraw-edge].canvas-edge-selected')
+      if (!edge) return { ok: false, reason: 'not-selected' }
+      const end = edge.getPointAtLength(edge.getTotalLength())
+      return { ok: true, drop, end: { x: end.x, y: end.y } }
+    })()`
+  )
+  check(
+    '端点可停在形状上的任意位置',
+    freeEnd.ok &&
+      Math.abs(freeEnd.end.x - freeEnd.drop.x) < 0.05 &&
+      Math.abs(freeEnd.end.y - freeEnd.drop.y) < 0.05,
+    freeEnd
+  )
+
+  // 靠近形状边缘时吸附到轮廓:把起点拖到第一个节点上边缘内侧 3px(远离中点锚点),
+  // 应精确落到上边缘的最近点
+  const edgeSnapped = await js(
+    wc,
+    `(() => {
+      const surface = document.querySelector('.canvas-surface')
+      const world = document.querySelector('.canvas-world')
+      const wm = /translate\\(([-\\d.]+) ([-\\d.]+)\\) scale\\(([-\\d.]+)\\)/.exec(world.getAttribute('transform'))
+      if (!wm) return { ok: false, reason: 'no-world' }
+      const tx = +wm[1], ty = +wm[2], scale = +wm[3]
+      const sr = surface.getBoundingClientRect()
+      const toClient = (x, y) => ({ x: sr.left + tx + x * scale, y: sr.top + ty + y * scale })
+      const node = document.querySelectorAll('[data-idraw-node]')[0]
+      const nm = /translate\\(([-\\d.]+) ([-\\d.]+)\\)/.exec(node.getAttribute('transform'))
+      const box = node.getBBox()
+      // 取靠近左上角的一段上边缘:按「中心方向」判断会从左侧水平离开,
+      // 按「最近轮廓边」判断应该垂直向上离开
+      const edge = { x: +nm[1] + box.width * 0.1, y: +nm[2] }
+      const handle = document.querySelector('[data-edge-end="from"]')
+      if (!handle) return { ok: false, reason: 'no-handle' }
+      const svg = document.querySelector('.canvas-surface svg')
+      const br = svg.getBoundingClientRect()
+      const cx = br.left + Number(handle.getAttribute('cx'))
+      const cy = br.top + Number(handle.getAttribute('cy'))
+      // 上边缘内侧 3px:在边缘吸附阈值内、离中点锚点足够远
+      const near = toClient(edge.x, edge.y + 3)
+      const fire = (type, px, py, buttons) => surface.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, cancelable: true, clientX: px, clientY: py,
+        button: 0, buttons, pointerId: 1, isPrimary: true
+      }))
+      fire('pointerdown', cx, cy, 1)
+      fire('pointermove', near.x, near.y, 1)
+      fire('pointerup', near.x, near.y, 0)
+      const selected = document.querySelector('[data-idraw-edge].canvas-edge-selected')
+      if (!selected) return { ok: false, reason: 'not-selected' }
+      const start = selected.getPointAtLength(0)
+      const nearStart = selected.getPointAtLength(4)
+      return {
+        ok: true,
+        edge,
+        start: { x: start.x, y: start.y },
+        nearStart: { x: nearStart.x, y: nearStart.y }
+      }
+    })()`
+  )
+  check(
+    '端点靠近形状边缘时吸附到轮廓',
+    edgeSnapped.ok &&
+      Math.abs(edgeSnapped.start.x - edgeSnapped.edge.x) < 0.05 &&
+      Math.abs(edgeSnapped.start.y - edgeSnapped.edge.y) < 0.05,
+    edgeSnapped
+  )
+  check(
+    '从轮廓吸附点垂直离开,不贴着形状边',
+    edgeSnapped.ok && Math.abs(edgeSnapped.nearStart.x - edgeSnapped.start.x) < 0.5,
+    edgeSnapped
+  )
+
+  // 靠近特殊点时仍然要吸附:把起点拖到第一个节点下边锚点旁 3px,应精确落到锚点
+  const snappedEnd = await js(
+    wc,
+    `(() => {
+      const surface = document.querySelector('.canvas-surface')
+      const world = document.querySelector('.canvas-world')
+      const wm = /translate\\(([-\\d.]+) ([-\\d.]+)\\) scale\\(([-\\d.]+)\\)/.exec(world.getAttribute('transform'))
+      if (!wm) return { ok: false, reason: 'no-world' }
+      const tx = +wm[1], ty = +wm[2], scale = +wm[3]
+      const sr = surface.getBoundingClientRect()
+      const toClient = (x, y) => ({ x: sr.left + tx + x * scale, y: sr.top + ty + y * scale })
+      const node = document.querySelectorAll('[data-idraw-node]')[0]
+      const nm = /translate\\(([-\\d.]+) ([-\\d.]+)\\)/.exec(node.getAttribute('transform'))
+      const box = node.getBBox()
+      const anchor = { x: +nm[1] + box.width / 2, y: +nm[2] + box.height }
+      const handle = document.querySelector('[data-edge-end="from"]')
+      if (!handle) return { ok: false, reason: 'no-handle' }
+      const svg = document.querySelector('.canvas-surface svg')
+      const br = svg.getBoundingClientRect()
+      const cx = br.left + Number(handle.getAttribute('cx'))
+      const cy = br.top + Number(handle.getAttribute('cy'))
+      // 锚点旁 3px:仍在吸附阈值内
+      const near = toClient(anchor.x + 3, anchor.y + 2)
+      const fire = (type, px, py, buttons) => surface.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, cancelable: true, clientX: px, clientY: py,
+        button: 0, buttons, pointerId: 1, isPrimary: true
+      }))
+      fire('pointerdown', cx, cy, 1)
+      fire('pointermove', near.x, near.y, 1)
+      fire('pointerup', near.x, near.y, 0)
+      const edge = document.querySelector('[data-idraw-edge].canvas-edge-selected')
+      if (!edge) return { ok: false, reason: 'not-selected' }
+      const start = edge.getPointAtLength(0)
+      return { ok: true, anchor, start: { x: start.x, y: start.y } }
+    })()`
+  )
+  check(
+    '端点靠近特殊点时吸附到锚点',
+    snappedEnd.ok &&
+      Math.abs(snappedEnd.start.x - snappedEnd.anchor.x) < 0.05 &&
+      Math.abs(snappedEnd.start.y - snappedEnd.anchor.y) < 0.05,
+    snappedEnd
+  )
+
+  // 终点落在形状右边缘、另一端在左侧时,末段应沿线的方向进入(箭头朝前),
+  // 而不是先绕到轮廓外侧再折回来,导致箭头看起来反向
+  const arrowFlow = await js(
+    wc,
+    `(() => {
+      const surface = document.querySelector('.canvas-surface')
+      const world = document.querySelector('.canvas-world')
+      const wm = /translate\\(([-\\d.]+) ([-\\d.]+)\\) scale\\(([-\\d.]+)\\)/.exec(world.getAttribute('transform'))
+      if (!wm) return { ok: false, reason: 'no-world' }
+      const tx = +wm[1], ty = +wm[2], scale = +wm[3]
+      const sr = surface.getBoundingClientRect()
+      const toClient = (x, y) => ({ x: sr.left + tx + x * scale, y: sr.top + ty + y * scale })
+      const target = document.querySelectorAll('[data-idraw-node]')[1]
+      const nm = /translate\\(([-\\d.]+) ([-\\d.]+)\\)/.exec(target.getAttribute('transform'))
+      const box = target.getBBox()
+      // 右侧边缘、避开中点锚点(10px/scale 吸附半径之外)
+      const drop = { x: +nm[1] + box.width, y: +nm[2] + box.height * 0.9 }
+      const handle = document.querySelector('[data-edge-end="to"]')
+      if (!handle) return { ok: false, reason: 'no-handle' }
+      const svg = document.querySelector('.canvas-surface svg')
+      const br = svg.getBoundingClientRect()
+      const cx = br.left + Number(handle.getAttribute('cx'))
+      const cy = br.top + Number(handle.getAttribute('cy'))
+      const p = toClient(drop.x, drop.y)
+      const fire = (type, px, py, buttons) => surface.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, cancelable: true, clientX: px, clientY: py,
+        button: 0, buttons, pointerId: 1, isPrimary: true
+      }))
+      fire('pointerdown', cx, cy, 1)
+      fire('pointermove', p.x, p.y, 1)
+      fire('pointerup', p.x, p.y, 0)
+      const edge = document.querySelector('[data-idraw-edge].canvas-edge-selected')
+      if (!edge) return { ok: false, reason: 'not-selected' }
+      const len = edge.getTotalLength()
+      const end = edge.getPointAtLength(len)
+      const near = edge.getPointAtLength(Math.max(0, len - 4))
+      return {
+        ok: true,
+        drop,
+        end: { x: end.x, y: end.y },
+        near: { x: near.x, y: near.y }
+      }
+    })()`
+  )
+  check(
+    '终点落在右边缘时沿线的方向进入(箭头不反转)',
+    arrowFlow.ok &&
+      Math.abs(arrowFlow.end.x - arrowFlow.drop.x) < 0.05 &&
+      Math.abs(arrowFlow.end.y - arrowFlow.drop.y) < 0.05 &&
+      arrowFlow.end.x - arrowFlow.near.x > 3 &&
+      Math.abs(arrowFlow.end.y - arrowFlow.near.y) < 0.5,
+    arrowFlow
+  )
+
+  // 固定锚点也一样:吸附到右边缘中点的东锚点、另一端在左侧时,
+  // 不能在端点外侧折返,末段应沿线的方向进入
+  const anchorFlow = await js(
+    wc,
+    `(() => {
+      const surface = document.querySelector('.canvas-surface')
+      const world = document.querySelector('.canvas-world')
+      const wm = /translate\\(([-\\d.]+) ([-\\d.]+)\\) scale\\(([-\\d.]+)\\)/.exec(world.getAttribute('transform'))
+      if (!wm) return { ok: false, reason: 'no-world' }
+      const tx = +wm[1], ty = +wm[2], scale = +wm[3]
+      const sr = surface.getBoundingClientRect()
+      const toClient = (x, y) => ({ x: sr.left + tx + x * scale, y: sr.top + ty + y * scale })
+      const target = document.querySelectorAll('[data-idraw-node]')[1]
+      const nm = /translate\\(([-\\d.]+) ([-\\d.]+)\\)/.exec(target.getAttribute('transform'))
+      const box = target.getBBox()
+      // 右边缘中点 = 东锚点,会走固定锚点吸附
+      const drop = { x: +nm[1] + box.width, y: +nm[2] + box.height / 2 }
+      const handle = document.querySelector('[data-edge-end="to"]')
+      if (!handle) return { ok: false, reason: 'no-handle' }
+      const svg = document.querySelector('.canvas-surface svg')
+      const br = svg.getBoundingClientRect()
+      const cx = br.left + Number(handle.getAttribute('cx'))
+      const cy = br.top + Number(handle.getAttribute('cy'))
+      const p = toClient(drop.x, drop.y)
+      const fire = (type, px, py, buttons) => surface.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, cancelable: true, clientX: px, clientY: py,
+        button: 0, buttons, pointerId: 1, isPrimary: true
+      }))
+      fire('pointerdown', cx, cy, 1)
+      fire('pointermove', p.x, p.y, 1)
+      fire('pointerup', p.x, p.y, 0)
+      const edge = document.querySelector('[data-idraw-edge].canvas-edge-selected')
+      if (!edge) return { ok: false, reason: 'not-selected' }
+      const len = edge.getTotalLength()
+      const end = edge.getPointAtLength(len)
+      const near = edge.getPointAtLength(Math.max(0, len - 4))
+      return {
+        ok: true,
+        drop,
+        end: { x: end.x, y: end.y },
+        near: { x: near.x, y: near.y }
+      }
+    })()`
+  )
+  check(
+    '吸附到东锚点时也不折返(箭头朝前)',
+    anchorFlow.ok &&
+      Math.abs(anchorFlow.end.x - anchorFlow.drop.x) < 0.05 &&
+      Math.abs(anchorFlow.end.y - anchorFlow.drop.y) < 0.05 &&
+      anchorFlow.end.x - anchorFlow.near.x > 3 &&
+      Math.abs(anchorFlow.end.y - anchorFlow.near.y) < 0.5,
+    anchorFlow
+  )
+
+  // 还原 to 端点:后面的保存用例会断言 30%/80% 的相对比例
+  await js(
+    wc,
+    `(() => {
+      const surface = document.querySelector('.canvas-surface')
+      const world = document.querySelector('.canvas-world')
+      const wm = /translate\\(([-\\d.]+) ([-\\d.]+)\\) scale\\(([-\\d.]+)\\)/.exec(world.getAttribute('transform'))
+      if (!wm) return false
+      const tx = +wm[1], ty = +wm[2], scale = +wm[3]
+      const sr = surface.getBoundingClientRect()
+      const toClient = (x, y) => ({ x: sr.left + tx + x * scale, y: sr.top + ty + y * scale })
+      const target = document.querySelectorAll('[data-idraw-node]')[1]
+      const nm = /translate\\(([-\\d.]+) ([-\\d.]+)\\)/.exec(target.getAttribute('transform'))
+      const box = target.getBBox()
+      const drop = { x: +nm[1] + box.width * 0.3, y: +nm[2] + box.height * 0.8 }
+      const handle = document.querySelector('[data-edge-end="to"]')
+      if (!handle) return false
+      const svg = document.querySelector('.canvas-surface svg')
+      const br = svg.getBoundingClientRect()
+      const cx = br.left + Number(handle.getAttribute('cx'))
+      const cy = br.top + Number(handle.getAttribute('cy'))
+      const p = toClient(drop.x, drop.y)
+      const fire = (type, px, py, buttons) => surface.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, cancelable: true, clientX: px, clientY: py,
+        button: 0, buttons, pointerId: 1, isPrimary: true
+      }))
+      fire('pointerdown', cx, cy, 1)
+      fire('pointermove', p.x, p.y, 1)
+      fire('pointerup', p.x, p.y, 0)
+      return true
+    })()`
+  )
+  await wait(120)
+
+  // 拖动折点:自动布线的拐角第一次拖动后固定为手动折点,路径跟着改
+  const waypointDrag = await js(
+    wc,
+    `(() => {
+      const surface = document.querySelector('.canvas-surface')
+      const svg = document.querySelector('.canvas-surface svg')
+      const edge = document.querySelector('[data-idraw-edge].canvas-edge-selected')
+      const all = [...document.querySelectorAll('[data-edge-waypoint]')]
+      if (!svg || !edge || all.length === 0) return { ok: false, reason: 'no-handle' }
+      // 挑离标签框最远的折点:标签框的命中优先级高于折点
+      const box = document.querySelector('.canvas-edge-box')
+      let handle = all[0]
+      if (box) {
+        const bx = Number(box.getAttribute('x')) + Number(box.getAttribute('width')) / 2
+        const by = Number(box.getAttribute('y')) + Number(box.getAttribute('height')) / 2
+        let best = -1
+        for (const h of all) {
+          const cx = Number(h.getAttribute('x')) + Number(h.getAttribute('width')) / 2
+          const cy = Number(h.getAttribute('y')) + Number(h.getAttribute('height')) / 2
+          const d = Math.hypot(cx - bx, cy - by)
+          if (d > best) {
+            best = d
+            handle = h
+          }
+        }
+      }
+      const dBefore = edge.getAttribute('d')
+      const br = svg.getBoundingClientRect()
+      const hx = br.left + Number(handle.getAttribute('x')) + Number(handle.getAttribute('width')) / 2
+      const hy = br.top + Number(handle.getAttribute('y')) + Number(handle.getAttribute('height')) / 2
+      const fire = (type, px, py, buttons) => surface.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, cancelable: true, clientX: px, clientY: py,
+        button: 0, buttons, pointerId: 1, isPrimary: true
+      }))
+      fire('pointerdown', hx, hy, 1)
+      fire('pointermove', hx + 40, hy + 30, 1)
+      fire('pointerup', hx + 40, hy + 30, 0)
+      const edge2 = document.querySelector('[data-idraw-edge].canvas-edge-selected')
+      if (!edge2) return { ok: false, reason: 'deselected' }
+      return {
+        ok: true,
+        changed: dBefore !== edge2.getAttribute('d'),
+        handles: document.querySelectorAll('[data-edge-waypoint]').length
+      }
+    })()`
+  )
+  check(
+    '拖动折点改变连线路径',
+    waypointDrag.ok && waypointDrag.changed && waypointDrag.handles >= 1,
+    waypointDrag
+  )
+
+  // 曲线路由:折点作为贝塞尔控制点,拖动手柄应改变弧度
+  const curveSwitch = await js(
+    wc,
+    `(() => {
+      const btn = document.querySelector('.canvas-style-seg[aria-label="连线方式"] button[aria-label="曲线"]')
+      if (!btn) return false
+      btn.click()
+      return true
+    })()`
+  )
+  await wait(150)
+  const curveDrag = await js(
+    wc,
+    `(() => {
+      const surface = document.querySelector('.canvas-surface')
+      const svg = document.querySelector('.canvas-surface svg')
+      const edge = document.querySelector('[data-idraw-edge].canvas-edge-selected')
+      const all = [...document.querySelectorAll('[data-edge-waypoint]')]
+        .filter(h => Number(h.getAttribute('data-edge-waypoint')) <= 1)
+      if (!svg || !edge || all.length === 0) return { ok: false, reason: 'no-handle' }
+      // 挑离标签框最远的手柄,避免点到标签
+      const box = document.querySelector('.canvas-edge-box')
+      let handle = all[0]
+      if (box) {
+        const bx = Number(box.getAttribute('x')) + Number(box.getAttribute('width')) / 2
+        const by = Number(box.getAttribute('y')) + Number(box.getAttribute('height')) / 2
+        let best = -1
+        for (const h of all) {
+          const cx = Number(h.getAttribute('x')) + Number(h.getAttribute('width')) / 2
+          const cy = Number(h.getAttribute('y')) + Number(h.getAttribute('height')) / 2
+          const d = Math.hypot(cx - bx, cy - by)
+          if (d > best) {
+            best = d
+            handle = h
+          }
+        }
+      }
+      const dBefore = edge.getAttribute('d')
+      const br = svg.getBoundingClientRect()
+      const hx = br.left + Number(handle.getAttribute('x')) + Number(handle.getAttribute('width')) / 2
+      const hy = br.top + Number(handle.getAttribute('y')) + Number(handle.getAttribute('height')) / 2
+      const fire = (type, px, py, buttons) => surface.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, cancelable: true, clientX: px, clientY: py,
+        button: 0, buttons, pointerId: 1, isPrimary: true
+      }))
+      fire('pointerdown', hx, hy, 1)
+      fire('pointermove', hx + 25, hy - 25, 1)
+      fire('pointerup', hx + 25, hy - 25, 0)
+      const edge2 = document.querySelector('[data-idraw-edge].canvas-edge-selected')
+      if (!edge2) return { ok: false, reason: 'deselected' }
+      return {
+        ok: true,
+        isCurve: /C/.test(edge2.getAttribute('d') || ''),
+        changed: dBefore !== edge2.getAttribute('d')
+      }
+    })()`
+  )
+  check('可以切换到曲线路由', curveSwitch === true)
+  check(
+    '曲线手柄可调整弧度',
+    curveDrag.ok && curveDrag.isCurve && curveDrag.changed,
+    curveDrag
+  )
+
   // 临时画布的核心承诺:不自动保存。等待超过自动保存延迟后,不应有写盘动作。
   const writesBeforeIdle = writeCalls
   await wait(1600)
@@ -574,7 +1136,7 @@ async function main() {
   }
 
   const before = await nodePos()
-  await js(
+  const dragAnchors = await js(
     wc,
     `(() => {
       const surface = document.querySelector('.canvas-surface')
@@ -594,9 +1156,15 @@ async function main() {
         bubbles: true, cancelable: true, clientX: px, clientY: py,
         button: 0, buttons, pointerId: 1, isPrimary: true
       }))
+      // 先移到空白处清掉悬浮,再悬浮节点让锚点出现
+      fire('pointermove', r.left + 8, r.top + 8, 0)
+      fire('pointermove', cx, cy, 0)
+      const anchorsBefore = document.querySelectorAll('.canvas-anchor').length
       fire('pointerdown', cx, cy, 1)
       fire('pointermove', cx + 60, cy + 40, 1)
+      const anchorsDuring = document.querySelectorAll('.canvas-anchor').length
       fire('pointerup', cx + 60, cy + 40, 0)
+      return { anchorsBefore, anchorsDuring }
     })()`
   )
   await wait(120)
@@ -605,6 +1173,11 @@ async function main() {
     '拖动改变了节点坐标',
     !!before && !!after && (after.x !== before.x || after.y !== before.y),
     { before, after }
+  )
+  check(
+    '移动时不再保留原位置的悬停锚点',
+    dragAnchors.anchorsBefore > 0 && dragAnchors.anchorsDuring === 0,
+    dragAnchors
   )
 
   console.log('[4] 撤销 / 重做')
@@ -618,6 +1191,51 @@ async function main() {
     '重做回到拖动后',
     !!after && (await waitForPos(after.x, after.y))
   )
+
+  console.log('[3.5] 缩放手柄粒度')
+  const nodeBox = () =>
+    js(
+      wc,
+      `(() => {
+        const node = document.querySelector('[data-idraw-node]')
+        if (!node) return null
+        const m = /translate\\(([-\\d.]+) ([-\\d.]+)\\)/.exec(node.getAttribute('transform') || '')
+        const box = node.getBBox()
+        return m ? { x: +m[1], y: +m[2], w: box.width, h: box.height } : null
+      })()`
+    )
+  const resizeBefore = await nodeBox()
+  await js(
+    wc,
+    `(() => {
+      const surface = document.querySelector('.canvas-surface')
+      const world = document.querySelector('.canvas-world')
+      const node = document.querySelector('[data-idraw-node]')
+      const wm = /translate\\(([-\\d.]+) ([-\\d.]+)\\) scale\\(([-\\d.]+)\\)/.exec(world.getAttribute('transform'))
+      const tx = +wm[1], ty = +wm[2], scale = +wm[3]
+      const nm = /translate\\(([-\\d.]+) ([-\\d.]+)\\)/.exec(node.getAttribute('transform'))
+      const box = node.getBBox()
+      const r = surface.getBoundingClientRect()
+      const sx = r.left + tx + (+nm[1] + box.width) * scale
+      const sy = r.top + ty + (+nm[2] + box.height) * scale
+      // 11 个世界单位的拖动:旧实现按 20px 网格吸附会跳 20,新实现应接近 11
+      const delta = 11 * scale
+      const fire = (type, px, py, buttons) => surface.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, cancelable: true, clientX: px, clientY: py,
+        button: 0, buttons, pointerId: 1, isPrimary: true
+      }))
+      fire('pointerdown', sx, sy, 1)
+      fire('pointermove', sx + delta, sy + delta, 1)
+      fire('pointerup', sx + delta, sy + delta, 0)
+    })()`
+  )
+  await wait(120)
+  const resizeAfter = await nodeBox()
+  const deltaW = resizeAfter && resizeBefore ? resizeAfter.w - resizeBefore.w : null
+  check('缩放粒度与拖动一致(不是 20px 跳格)', deltaW !== null && deltaW > 0 && deltaW < 15, {
+    before: resizeBefore,
+    after: resizeAfter
+  })
 
   console.log('[4.5] 填充色实时预览 / 上一填充色')
   const fillOfFirst = () =>
@@ -677,6 +1295,19 @@ async function main() {
   )
   const savedX = Number(/data-idraw-node="n1"[\s\S]*?data-idraw-x="([-\d.]+)"/.exec(savedContent)?.[1])
   check('保存的是拖动后的坐标', savedX === after.x, { savedX, after })
+  check(
+    '自由挂接的端点写入节点相对比例',
+    savedOk &&
+      /data-idraw-to-anchor="free"/.test(savedContent) &&
+      /data-idraw-to-x="0\.3"/.test(savedContent) &&
+      /data-idraw-to-y="0\.8"/.test(savedContent)
+  )
+  check(
+    '吸附到特殊点的端点写入锚点侧',
+    savedOk && /data-idraw-from-anchor="s"/.test(savedContent)
+  )
+  check('标签位置写入 SVG', savedOk && /data-idraw-label-pos="/.test(savedContent))
+  check('手动折点写入 SVG', savedOk && /data-idraw-waypoints="/.test(savedContent))
 
   console.log('[6] 新建并重新打开')
   wc.send('app:menu-command', 'file:new')
@@ -856,28 +1487,44 @@ async function main() {
     )
   )
 
-  // 双击空白处建一个空文本框:即使没有文字,也要有可见的占位框
-  await js(
+  // 双击空白处建一个空文本框:即使没有文字,也要有可见的占位框。
+  // 候选点除了避开形状之外还要实测:甘特图的网格线(也是连线)和文字形状的模型框
+  // 都可能吃掉双击;如果打开的是已有对象,按 Esc 取消并换下一个候选点。
+  const createdEmptyText = await js(
     wc,
-    `(() => {
+    `(async () => {
       const surface = document.querySelector('.canvas-surface')
       const r = surface.getBoundingClientRect()
       const nodes = [...document.querySelectorAll('[data-idraw-node]')].map(el => el.getBoundingClientRect())
+      const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
+      const countNodes = () => document.querySelectorAll('[data-idraw-node]').length
       const size = 90
-      let x = r.left + 30, y = r.top + 30
-      outer: for (let yy = r.top + 20; yy + size <= r.bottom - 20; yy += 40) {
+      const tryPoint = async (cx, cy) => {
+        const before = countNodes()
+        surface.dispatchEvent(new MouseEvent('dblclick', {
+          bubbles: true, cancelable: true, clientX: cx, clientY: cy
+        }))
+        await sleep(40)
+        const ta = document.querySelector('.canvas-text-editor')
+        if (ta && countNodes() > before) return true
+        // 双击落在了已有形状/连线上:取消这次文字编辑,继续找空白处
+        ta?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+        ta?.blur()
+        await sleep(30)
+        return false
+      }
+      for (let yy = r.top + 20; yy + size <= r.bottom - 20; yy += 40) {
         for (let xx = r.left + 20; xx + size <= r.right - 20; xx += 40) {
-          const free = !nodes.some(b => xx < b.right && xx + size > b.left && yy < b.bottom && yy + size > b.top)
-          if (free) { x = xx + size / 2; y = yy + size / 2; break outer }
+          const cx = xx + size / 2, cy = yy + size / 2
+          const freeOfNodes = !nodes.some(b => xx < b.right && xx + size > b.left && yy < b.bottom && yy + size > b.top)
+          if (!freeOfNodes) continue
+          if (await tryPoint(cx, cy)) return true
         }
       }
-      surface.dispatchEvent(new MouseEvent('dblclick', {
-        bubbles: true, cancelable: true, clientX: x, clientY: y
-      }))
-      return true
+      return false
     })()`
   )
-  check('双击空白处进入文字编辑', await waitFor(wc, "!!document.querySelector('.canvas-text-editor')"))
+  check('双击空白处进入文字编辑', createdEmptyText === true)
   await js(wc, "document.querySelector('.canvas-text-editor')?.blur()")
   check(
     '空文本框显示可见的占位框',
@@ -1205,10 +1852,26 @@ async function main() {
     '主题偏好已写入 localStorage',
     (await js(wc, "localStorage.getItem('idraw-theme')")) === themeAfter
   )
+  const expectedTipAfter = themeAfter === 'dark' ? '切换到浅色主题' : '切换到深色主题'
+  check(
+    '主题切换提示随状态更新',
+    (await js(
+      wc,
+      "document.querySelector('[data-action=toggle-theme]').getAttribute('data-tooltip')"
+    )) === expectedTipAfter
+  )
   await js(wc, "document.querySelector('[data-action=toggle-theme]').click()")
   check(
     '再次点击切回原主题',
     await waitFor(wc, `document.documentElement.dataset.theme === '${themeBefore}'`)
+  )
+  const expectedTipBack = themeBefore === 'dark' ? '切换到浅色主题' : '切换到深色主题'
+  check(
+    '再次切换后提示也更新',
+    (await js(
+      wc,
+      "document.querySelector('[data-action=toggle-theme]').getAttribute('data-tooltip')"
+    )) === expectedTipBack
   )
 
   console.log('[13] 状态栏菜单、设置与返回画布总览')

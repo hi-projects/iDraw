@@ -98,7 +98,7 @@ export class CanvasPlugin {
 
   start(): void {
     this.context.subscriptions.push(
-      imark.commands.registerCommand(CMD_OPEN, () => this.openCommand()),
+      imark.commands.registerCommand(CMD_OPEN, (args?: unknown) => this.openCommand(args)),
       imark.commands.registerCommand(CMD_NEW, () => this.newCommand()),
       imark.commands.registerCommand(CMD_INSERT, (args?: unknown) => this.insertCommand(args)),
       imark.commands.registerCommand(CMD_SAVE, () => this.sendMenu('file:save')),
@@ -122,7 +122,24 @@ export class CanvasPlugin {
 
   // ---------- 命令 ----------
 
-  private async openCommand(): Promise<void> {
+  private async openCommand(rawArgs?: unknown): Promise<void> {
+    // 笔记图片右上角的「在画布中打开」带着文件路径直接进来;命令面板没有参数,
+    // 仍然弹出选择器。
+    const direct = str(asRecord(rawArgs).path)
+    if (direct) {
+      if (!isAbsolute(direct) || !/\.svg$/i.test(direct)) {
+        await imark.window.showWarningMessage('只能打开 SVG 画布。')
+        return
+      }
+      if (!(await this.exists(direct))) {
+        await imark.window.showWarningMessage(`找不到文件：${direct}`)
+        return
+      }
+      const panel = this.ensurePanel()
+      panel.title = basename(direct)
+      await panel.webview.postMessage({ type: HOST_OPEN, path: direct })
+      return
+    }
     const path = await this.pickCanvas()
     if (!path) return
     this.ensurePanel()
@@ -203,11 +220,12 @@ export class CanvasPlugin {
     await panel.webview.postMessage({ type: HOST_NEW, path })
   }
 
-  /** 图片链接按文档位置写相对路径;目标里有空白/括号时用尖括号包住 */
+  /** 图片链接按文档位置写相对路径;alt 用画布文件名,图片加载失败时也能看出是哪张画布 */
   private imageMarkdown(docPath: string, canvasPath: string): string {
     const rel = relative(dirname(docPath), canvasPath).split(/[\\/]/).join('/')
     const dest = /[\s()]/.test(rel) ? `<${rel}>` : rel
-    return `![画布](${dest}) `
+    const name = basename(canvasPath).replace(/\.svg$/i, '')
+    return `![${name}](${dest}) `
   }
 
   private sendMenu(command: MenuCommand): void {

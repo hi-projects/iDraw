@@ -23,29 +23,31 @@
   min-height: 0;
   overflow: hidden;
   background-color: var(--bg-app);
-  /* 顶部一层很淡的品牌绿柔光 + 画布同款点阵,让整页像一张工作台 */
+  /* 顶部品牌绿柔光 + 底部微弱压暗 + 画布同款点阵,让整页像一张有厚度的工作台 */
   background-image:
     radial-gradient(
-      ellipse 80% 55% at 50% -8%,
-      color-mix(in srgb, var(--brand) 9%, transparent),
+      ellipse 78% 52% at 50% -10%,
+      color-mix(in srgb, var(--brand) 8%, transparent),
       transparent 72%
     ),
+    linear-gradient(180deg, transparent 52%, rgba(14, 32, 26, 0.045) 100%),
     radial-gradient(
       circle at 1px 1px,
-      color-mix(in srgb, var(--text-primary) 7%, transparent) 1px,
+      color-mix(in srgb, var(--text-primary) 6%, transparent) 1px,
       transparent 0
     );
   background-size:
     auto,
+    auto,
     24px 24px;
-  background-repeat: no-repeat, repeat;
+  background-repeat: no-repeat, no-repeat, repeat;
   /* 缩略图卡片表面完全透明,只保留一圈渐变描边和投影,让页面点阵直接透出来 */
   /* 渐变外边框:顶部接近白色,底部压暗 */
-  --thumb-edge: linear-gradient(180deg, #ffffff 0%, #f1f1f6 30%, var(--border-strong) 100%);
+  --thumb-edge: linear-gradient(180deg, #ffffff 0%, #f4f8f6 30%, #cbd7d2 100%);
   --thumb-elevation:
-    0 1px 2px rgba(20, 22, 35, 0.07),
-    0 8px 18px -12px rgba(20, 22, 35, 0.22),
-    0 18px 36px -26px rgba(20, 22, 35, 0.3);
+    0 1px 2px rgba(18, 36, 30, 0.05),
+    0 10px 22px -16px rgba(18, 36, 30, 0.22),
+    0 26px 48px -32px rgba(18, 36, 30, 0.28);
   user-select: none;
   -webkit-app-region: drag;
 }
@@ -307,6 +309,7 @@
 .workspace-recent-meta {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
   padding: 7px 12px;
 }
@@ -317,14 +320,20 @@
 }
 
 .workspace-recent-name {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   font-size: 12.5px;
   font-weight: 600;
   color: var(--text-primary);
+  text-align: center;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* 中文字形视觉上比同字号英文大,含中文的标签稍微收小一点 */
+.workspace-recent-name.is-cjk {
+  font-size: 11.5px;
 }
 
 /* 最近打开区域直接铺在页面背景上,不再套一层白色卡片/虚线框 */
@@ -348,7 +357,7 @@
   justify-content: center;
   flex: 1;
   width: 100%;
-  border: 1.5px dashed rgba(20, 22, 35, 0.18);
+  border: 1.5px dashed color-mix(in srgb, var(--text-primary) 18%, transparent);
   border-radius: 14px;
   /* 加号框也完全透明,只留虚线和投影,页面点阵直接穿透 */
   background: transparent;

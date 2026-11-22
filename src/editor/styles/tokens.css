@@ -51,37 +51,41 @@
 
 :root,
 :root[data-theme='light'] {
-  --bg-app: #f4f4f7;
+  /*
+   * 浅色不做纯白满屏:用带一点青绿的暖灰做底,白色留给画布和缩略图本身。
+   * 降低整体亮度后,文字/边框的层次和品牌绿会更突出,也不会刺眼。
+   */
+  --bg-app: #edf1ef;
   --bg-editor: #ffffff;
-  --bg-toolbar: #ffffff;
-  --bg-toolbar-btn-hover: #f1f1f5;
+  --bg-toolbar: #f8faf9;
+  --bg-toolbar-btn-hover: #eef3f1;
   /* 工具栏里的分段控件底色(药丸形工具组) */
-  --bg-segment: #f3f3f7;
-  --bg-segment-hover: rgba(255, 255, 255, 0.72);
+  --bg-segment: #eaf0ed;
+  --bg-segment-hover: rgba(255, 255, 255, 0.78);
   /* 输入框/下拉的底色 */
-  --bg-control: #fafafc;
+  --bg-control: #f5f8f7;
   /* 画布底色(用于空心箭头内部、连线标签的遮挡描边) */
   --canvas-knockout: #ffffff;
-  --text-primary: #1b1c21;
-  --text-secondary: #60626c;
-  --text-tertiary: #9a9ca6;
-  --border: #e7e7ee;
-  --border-strong: #dcdce4;
+  --text-primary: #1d2a26;
+  --text-secondary: #5b6964;
+  --text-tertiary: #8d9a95;
+  --border: #dce4e0;
+  --border-strong: #ccd8d3;
   /* 引用块左侧竖线:比 --border 在深色下更亮一档;浅色沿用边框灰 */
-  --quote-bar: #e7e7ee;
+  --quote-bar: #dce4e0;
   /* 强调色:与应用图标一致的青绿色 */
   --accent: #178c82;
   --accent-hover: #12756c;
-  --accent-soft: rgba(23, 140, 130, 0.12);
-  --accent-softer: rgba(23, 140, 130, 0.07);
+  --accent-soft: rgba(23, 140, 130, 0.11);
+  --accent-softer: rgba(23, 140, 130, 0.06);
   /* 品牌绿是同一种颜色的语义别名,选择页等场景按需使用 */
   --brand: var(--accent);
   --brand-hover: var(--accent-hover);
   --brand-soft: var(--accent-soft);
-  --bg-code: rgba(175, 184, 193, 0.25);
-  --bg-codeblock: #f6f8fa;
-  --bg-selection: rgba(23, 140, 130, 0.18);
-  --shadow: rgba(20, 22, 35, 0.1);
+  --bg-code: rgba(129, 150, 143, 0.2);
+  --bg-codeblock: #f3f7f5;
+  --bg-selection: rgba(23, 140, 130, 0.16);
+  --shadow: rgba(20, 40, 34, 0.11);
   --success: #16a34a;
   --warn: #d97706;
   --danger: #e5484d;

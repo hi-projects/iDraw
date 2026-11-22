@@ -31,7 +31,7 @@ import { CanvasRenderer, type Guide, type RenderState, type Viewport } from './r
 import { Interactions, type CanvasTextTarget, type InteractionHost } from './interactions'
 import { History, applyPatches, nodeDiffPatches, type Patch } from './history'
 import { parseCanvasSvg, serializeCanvas } from './serialize'
-import { computedViewBox, contentBounds, edgeGeometry, nodesBounds } from './geometry'
+import { computedViewBox, contentBounds, edgeLabelPoint, nodesBounds } from './geometry'
 import {
   copySelection as buildClipboard,
   insertPayload,
@@ -294,8 +294,7 @@ export class CanvasRuntime {
     this.renderer.setGridVisible(this.gridVisible)
     this.interactions = new Interactions(this.interactionHost())
     if (!this.viewportInitialized) {
-      this.viewportInitialized = true
-      this.resetView()
+      this.initializeViewport()
     } else {
       this.renderer.setViewport(this.viewport)
       this.lastSurfaceSize = this.renderer.size
@@ -529,9 +528,19 @@ export class CanvasRuntime {
   }
 
   /**
-   * 默认视图:固定 100% 缩放,内容居中;还没有内容时居中页面。
-   * 打开文件、新建画布都从这里开始,不再默认缩到"适应页面"。
+   * 首次显示时的视图:固定 100%,内容居中。要看全图时点工具栏「适应内容」。
+   *
+   * 面板在后台标签里恢复时容器还是 0 尺寸,这时不初始化 —— 等 ResizeObserver
+   * 拿到真实尺寸再补,见 handleSurfaceResize。
    */
+  private initializeViewport(): void {
+    const size = this.renderer?.size
+    if (!size || size.w <= 1 || size.h <= 1) return
+    this.viewportInitialized = true
+    this.resetView()
+  }
+
+  /** 重置缩放:固定 100%,内容居中(工具栏的缩放重置) */
   private resetView(): void {
     const size = this.renderer?.size ?? { w: 1200, h: 800 }
     const rect = contentBounds(this.doc) ?? computedViewBox(this.doc)
@@ -580,6 +589,11 @@ export class CanvasRuntime {
    */
   private handleSurfaceResize(): void {
     if (this.disposed || !this.renderer) return
+    // 挂载时面板还在后台标签里(0 尺寸):等第一次拿到真实尺寸再适配内容
+    if (!this.viewportInitialized) {
+      this.initializeViewport()
+      return
+    }
     const size = this.renderer.size
     const prev = this.lastSurfaceSize
     this.lastSurfaceSize = size
@@ -918,13 +932,17 @@ export class CanvasRuntime {
       initial = node.text
       selectAll = node.text === '' || node.text === '文字'
     } else if (edge) {
-      const g = edgeGeometry(edge, this.doc)
-      const p = this.renderer!.screenOf(g.mid.x, g.mid.y)
+      const at = edgeLabelPoint(edge, this.doc)
+      const p = this.renderer!.screenOf(at.x, at.y)
       const edgeLine = Math.round(edge.style.fontSize * 1.4)
+      // 标签编辑框:外框居中于标签锚点,文字再用上下等量内边距垂直居中
+      ta.classList.add('canvas-text-editor-label')
       ta.style.left = `${p.x - 90 * scale}px`
-      ta.style.top = `${p.y - (4 + baselineOffset(edge.style.fontSize)) * scale}px`
+      ta.style.top = `${p.y - 16 * scale}px`
       ta.style.width = `${180 * scale}px`
       ta.style.height = `${32 * scale}px`
+      // 32 高度减去上下 1px 边框,剩下的空间均分给文字行的上下
+      ta.style.paddingTop = `${Math.max(0, (32 - 2 - edgeLine) / 2) * scale}px`
       ta.style.fontSize = `${edge.style.fontSize * scale}px`
       ta.style.lineHeight = `${edgeLine * scale}px`
       ta.style.textAlign = 'center'
@@ -1004,7 +1022,25 @@ export class CanvasRuntime {
 
   // ---------- 渲染 ----------
 
+  /**
+   * 旧版本把连线标签的默认颜色存成了灰(#4b5563 / #a6a7b3)。深色主题下把它们
+   * 当作旧默认值迁移为新的白色;用户自己挑过的其它颜色不动。
+   */
+  private migrateLegacyLabelColors(): void {
+    if (this.readOnly) return
+    if (typeof document === 'undefined' || document.documentElement.dataset.theme !== 'dark') {
+      return
+    }
+    for (const edge of this.doc.edges) {
+      if (!edge.label) continue
+      if (edge.style.color === '#4b5563' || edge.style.color === '#a6a7b3') {
+        edge.style.color = '#ffffff'
+      }
+    }
+  }
+
   renderAll(): void {
+    this.migrateLegacyLabelColors()
     this.syncUi()
     if (!this.renderer) return
     this.renderer.setViewport(this.viewport)
@@ -1029,6 +1065,7 @@ export class CanvasRuntime {
       doc: this.doc,
       viewport: this.viewport,
       selected: this.selection,
+      readOnly: this.readOnly,
       editingNode: this.editing?.kind === 'node' ? this.editing.id : null,
       editingEdge: this.editing?.kind === 'edge' ? this.editing.id : null,
       marquee: this.snapshot.marquee,

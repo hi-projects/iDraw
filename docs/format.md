@@ -19,7 +19,8 @@ iDraw 自己的编辑信息（节点 id、锚点、路由方式、文字逻辑�
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000"
-     viewBox="0 0 1600 1000" data-idraw-canvas="1" data-idraw-version="1">
+     viewBox="0 0 1600 1000" data-idraw-canvas="1" data-idraw-version="1"
+     data-idraw-fit="80 80 240 160">
   <defs>
     <marker id="idraw-arrow-4b5563" ...>...</marker>
     <marker id="idraw-arrow-start-4b5563" ...>...</marker>
@@ -52,6 +53,9 @@ iDraw 自己的编辑信息（节点 id、锚点、路由方式、文字逻辑�
 - 根节点必须有 `data-idraw-canvas="1"`。**没有这个标记的 SVG 一律只读预览**，iDraw 不会保存
   或改写它。
 - `data-idraw-version` 是格式版本，当前为 `1`。
+- `data-idraw-fit` 是内容紧边界（`x y w h`，各留 40px），只给**把画布当图片显示**的地方用
+  （例如 iMark 笔记里的图片）：显示时去掉白色页面、按这个框收边，背景跟随所在主题。
+  文件自己的页面与根 `viewBox` 不受影响；空画布没有内容时它等于页面。
 - 背景页是一个白色 `<rect data-idraw-page="1">`；文件本身固定浅色纸面，不跟随应用深色主题，
   保证在任意查看器里颜色一致（编辑区的无限画布背景会跟随主题，但保存出来的文件仍是白底）。
 - **边层在节点层之前**，所以连线和标签不会被形状里的文字盖住。
@@ -102,17 +106,28 @@ iDraw 自己的几何以 `data-idraw-*` 为准。
 |---|---|
 | `data-idraw-edge` | 边 id，画布内唯一 |
 | `data-idraw-from-node` / `data-idraw-to-node` | 端点绑定的节点 id；空表示自由端点 |
-| `data-idraw-from-anchor` / `data-idraw-to-anchor` | `auto` / `n` / `e` / `s` / `w`；`auto` 由 iDraw 每次自动选边 |
-| `data-idraw-from-x` / `data-idraw-from-y` | 仅自由端点：世界坐标 |
+| `data-idraw-from-anchor` / `data-idraw-to-anchor` | `auto` / `n` / `e` / `s` / `w` / `free`；`auto` 由 iDraw 每次自动选边；`free` 表示端点停在任意位置 |
+| `data-idraw-from-x` / `data-idraw-from-y`（`to-x` / `to-y` 同理） | `free` 端点必填：未绑定节点时是世界坐标；绑定节点时是相对该节点宽高的比例（0–1） |
 | `data-idraw-routing` | `straight` / `orthogonal` / `curve` |
 | `data-idraw-arrow` | `none` / `start` / `end` / `both` |
 | `data-idraw-arrow-style` | `solid`(实心,缺省)/ `hollow`(空心) |
 | `data-idraw-arrow-size` | 箭头大小倍数,缺省 `9`,范围 2–20 |
+| `data-idraw-label-pos` | 标签在路径上的位置比例(0–1,0=起点,1=终点);缺省 `0.5` 即路径中点 |
+| `data-idraw-waypoints` | 手动路由折点:`x,y x,y …`(世界坐标);正交/直线下作为路径折点,曲线下取前两个作为贝塞尔控制点 |
 | `d` | 实际路径。其他软件直接按它绘制 |
 
+连线端点可以停在画布上的任何位置。落点是形状时写成 `anchor="free"` 并绑定节点 id，
+`x`/`y` 记的是相对该节点左上角的宽高比例（例如 `0.5 1` 表示底边中点），因此拖动或缩放
+形状时端点会跟着走；落点是空白处时不绑定节点，`x`/`y` 直接是世界坐标。旧文件的
+`n` / `e` / `s` / `w` 仍按对应边的中点处理。
+
+连线可以手动改路由：拖动选中连线上的菱形折点后，当前拐角会写成 `data-idraw-waypoints`
+里的世界坐标折点，之后不再自动布线（仍然保持正交，折点之间自动补拐角）。曲线路由下，
+前两个折点作为贝塞尔控制点使用，拖动两端手柄即可调整弧度。删除全部折点即可回到自动路由。
+
 边标签是相邻的 `<text data-idraw-edge-label="边 id">`，逻辑内容存在 `data-idraw-label`（同样用
-`&#10;` 表示换行），位置在路径中点。标签带白色描边（`paint-order="stroke"`），压在线上也
-清楚。
+`&#10;` 表示换行）。标签位置由连线上的 `data-idraw-label-pos` 记录，缺省是路径中点；编辑器里
+拖动标签框可以沿路径移动它。标签带白色描边（`paint-order="stroke"`），压在线上也清楚。
 
 箭头用 `<defs>` 里按**描边颜色 + 实心/空心 + 大小**生成的 marker
 （`idraw-arrow-<颜色>-<大小>` 与 `idraw-arrow-start-<颜色>-<大小>`；空心样式为

@@ -72,6 +72,14 @@ const autoSaveDelaySec = ref(autoSaveDelayMs() / 1000)
 /** 自动保存模式:定时保存 / 关闭 */
 const autoSaveMode = ref<AutoSaveMode>(getAutoSaveMode())
 
+/**
+ * 空仓库(一个画布都没有)时,中央引导卡片是唯一的鼠标入口:
+ * 侧栏和状态栏暂时禁用,避免还能点「新建画布 / 返回画布总览」。
+ */
+const workspaceEmptyModal = computed(
+  () => !!workspace.value && !runtime.value && workspace.value.canvases.length === 0
+)
+
 /** 全局菜单的 props/事件:状态栏内和选择页悬浮各用一份 */
 const globalMenuProps = computed(() => ({
   hasDocument: !!runtime.value,
@@ -822,6 +830,14 @@ function onWindowFocus(): void {
   if (view.value === 'workspace' && workspace.value) void refreshWorkspace(true)
 }
 
+/** 空仓库(还没打开画布)时,Esc 返回画布总览;菜单/弹窗打开时先让它们处理 */
+function onWorkspaceEmptyKeydown(e: KeyboardEvent): void {
+  if (e.key !== 'Escape') return
+  if (!workspace.value || runtime.value) return
+  if (document.querySelector('.idraw-corner-menu, [role="dialog"]')) return
+  backToPicker()
+}
+
 onMounted(() => {
   document.title = 'iDraw'
   unsubscribeMenu = api.onMenuCommand(handleMenuCommand)
@@ -830,6 +846,7 @@ onMounted(() => {
   window.addEventListener('beforeunload', beforeUnload)
   window.addEventListener('blur', onWindowBlur)
   window.addEventListener('focus', onWindowFocus)
+  window.addEventListener('keydown', onWorkspaceEmptyKeydown)
   void api.takePendingOpenFile().then(path => {
     // 双击文件启动时直接打开它,不经过仓库选择页
     if (path) void openStandalonePath(path)
@@ -843,6 +860,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', beforeUnload)
   window.removeEventListener('blur', onWindowBlur)
   window.removeEventListener('focus', onWindowFocus)
+  window.removeEventListener('keydown', onWorkspaceEmptyKeydown)
   clearDocument()
 })
 </script>
@@ -850,7 +868,11 @@ onBeforeUnmount(() => {
 <template>
   <div
     class="idraw-app"
-    :class="{ 'has-workspace': !!workspace, 'sidebar-collapsed': !!workspace && sidebarCollapsed }"
+    :class="{
+      'has-workspace': !!workspace,
+      'sidebar-collapsed': !!workspace && sidebarCollapsed,
+      'workspace-empty-modal': workspaceEmptyModal
+    }"
     @dragenter.prevent="onDragEnter"
     @dragover.prevent
     @dragleave.prevent="onDragLeave"

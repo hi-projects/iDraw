@@ -1596,10 +1596,41 @@ async function main() {
   check('打开仓库后出现侧栏', await waitFor(wc, "!!document.querySelector('.workspace-sidebar')"))
   check('空仓库显示引导卡片', await waitFor(wc, "!!document.querySelector('.workspace-empty')"))
   check(
-    '侧栏入口文案为新建文件',
+    '空仓库时侧栏被禁用',
+    await js(wc, "getComputedStyle(document.querySelector('.workspace-sidebar')).pointerEvents === 'none'")
+  )
+  check(
+    '空仓库时状态栏被禁用',
+    await js(wc, "getComputedStyle(document.querySelector('.idraw-statusbar')).pointerEvents === 'none'")
+  )
+  check(
+    '引导卡片的按钮仍可点击',
+    await js(wc, "getComputedStyle(document.querySelector('.workspace-empty-btn')).pointerEvents !== 'none'")
+  )
+  await js(
+    wc,
+    "document.querySelector('.workspace-empty')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))"
+  )
+  check(
+    '点击空白处不会关闭空仓库引导',
+    await js(wc, "!!document.querySelector('.workspace-empty')")
+  )
+  await js(wc, "window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))")
+  check(
+    '空仓库按 Esc 返回画布总览',
+    await waitFor(wc, "!!document.querySelector('.workspace-picker')")
+  )
+  await waitFor(wc, "!!document.querySelector('[data-action=recent-workspace]')")
+  await js(wc, "document.querySelector('[data-action=recent-workspace]').click()")
+  check(
+    '重新打开空仓库继续后续流程',
+    await waitFor(wc, "!!document.querySelector('.workspace-empty')")
+  )
+  check(
+    '侧栏入口文案为新建画布',
     await js(
       wc,
-      "document.querySelector('[data-action=workspace-new-canvas]').textContent.includes('新建文件')"
+      "document.querySelector('[data-action=workspace-new-canvas]').textContent.includes('新建画布')"
     )
   )
   check(
@@ -1670,7 +1701,7 @@ async function main() {
 
   await js(wc, "document.querySelector('[data-action=workspace-new-canvas]').click()")
   check(
-    '点击新建文件出现输入框',
+    '点击新建画布出现输入框',
     await waitFor(wc, "!!document.querySelector('[data-field=new-canvas-name]')")
   )
   await js(
@@ -1686,7 +1717,7 @@ async function main() {
   )
 
   await js(wc, "document.querySelector('[data-action=workspace-new-canvas]').click()")
-  check('出现新建文件输入框', await waitFor(wc, "!!document.querySelector('[data-field=new-canvas-name]')"))
+  check('出现新建画布输入框', await waitFor(wc, "!!document.querySelector('[data-field=new-canvas-name]')"))
   await js(
     wc,
     `(() => {

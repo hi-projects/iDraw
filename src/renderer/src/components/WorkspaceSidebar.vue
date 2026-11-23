@@ -236,16 +236,16 @@ async function removeEntry(entry: WorkspaceCanvasEntry): Promise<void> {
 
 <template>
   <aside class="workspace-sidebar" :class="{ collapsed }">
-    <!-- 顶部不再单独放仓库名/路径,首行就是「新建文件」+ 刷新 -->
+    <!-- 顶部不再单独放仓库名/路径,首行就是「新建画布」+ 刷新 -->
     <div class="workspace-sidebar-actions">
       <button
         class="workspace-new-canvas"
         data-action="workspace-new-canvas"
-        title="新建文件"
+        title="新建画布"
         @click="beginCreate"
       >
         <FilePlus2 :size="15" />
-        新建文件
+        新建画布
       </button>
       <button
         class="workspace-icon-btn"

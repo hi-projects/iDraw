@@ -52,7 +52,6 @@ const statusText = computed(() => {
       </template>
       <template v-else>
         <FileImage :size="12" />
-        <span class="idraw-status-name">临时画布</span>
         <span class="idraw-status-doc">{{ docName }}</span>
       </template>
     </div>

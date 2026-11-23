@@ -577,7 +577,7 @@
   color: var(--text-primary);
 }
 
-/* 侧栏首行:新建文件 + 刷新;同时兼作窗口拖拽区 */
+/* 侧栏首行:新建画布 + 刷新;同时兼作窗口拖拽区 */
 .workspace-sidebar-actions {
   display: flex;
   align-items: center;
@@ -789,7 +789,15 @@
   justify-content: center;
   padding: 32px;
   background: var(--bg-editor);
+  /* 空白区域不响应点击(引导卡片需要保持展示),同时作为窗口拖拽区 */
   -webkit-app-region: drag;
+}
+
+/* 空仓库引导卡片显示时,侧栏和状态栏暂时不可点:当前只能先新建画布 */
+.idraw-app.workspace-empty-modal .workspace-sidebar,
+.idraw-app.workspace-empty-modal .idraw-statusbar {
+  pointer-events: none;
+  opacity: 0.55;
 }
 
 .workspace-empty-card {
